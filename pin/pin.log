@@ -1,0 +1,2 @@
+Pin 3.2 kit 81201
+E:  asan.cpp:332: IARG_MEMORYOP_EA/IARG_MEMORYOP_MASKED_ON invalid memory operand index (1) on     60 0x00007f1f9ba8b093 call 0x7f1f9ba8bcd0
