@@ -3,7 +3,15 @@
 #include <stdlib.h>
 #include <iostream>
 
-#define VERSION "0.25"
+#define VERSION "0.27"
+
+#ifdef __i386__
+	#define HEX_FMT "0x%08x"
+	#define INT_FMT "%u"
+#elif __x86_64__
+	#define HEX_FMT "0x%08lx"
+	#define INT_FMT "%lu"
+#endif
 
 FILE *f;
 ADDRINT low_boundary;
@@ -23,15 +31,15 @@ VOID dotrace(CONTEXT *ctx, UINT32 threadid, ADDRINT eip, USIZE opcode_size)
 	ADDRINT ecx = PIN_GetContextReg(ctx, REG_GCX);
 	ADDRINT edx = PIN_GetContextReg(ctx, REG_GDX);
 	ADDRINT ebx = PIN_GetContextReg(ctx, REG_GBX);
-	ADDRINT ebp = PIN_GetContextReg(ctx, REG_GBP);
 	ADDRINT esp = PIN_GetContextReg(ctx, REG_STACK_PTR);
+	ADDRINT ebp = PIN_GetContextReg(ctx, REG_GBP);
 	ADDRINT esi = PIN_GetContextReg(ctx, REG_GSI);
 	ADDRINT edi = PIN_GetContextReg(ctx, REG_GDI);
 	
-	fprintf(f, "0x%08lx:%x {", eip, threadid);
+	fprintf(f, HEX_FMT ":%x {", eip, threadid);
 	for(i = 0; i < opcode_size; i++)
 		fprintf(f, "%02X", ( (unsigned char *) eip )[i] );
-	fprintf(f, "} 0x%08lX,0x%08lX,0x%08lX,0x%08lX,0x%08lX,0x%08lX,0x%08lX,0x%08lX\n", eax,ecx,edx,ebx,ebp,esp,esi,edi);
+	fprintf(f, "} "HEX_FMT","HEX_FMT","HEX_FMT","HEX_FMT","HEX_FMT","HEX_FMT","HEX_FMT","HEX_FMT"\n", eax,ecx,edx,ebx,esp,ebp,esi,edi);
 	fflush(f);
 }
 
@@ -40,13 +48,13 @@ VOID do_malloc(CONTEXT * ctx, ADDRINT addr)
 {
 	ADDRINT esp = PIN_GetContextReg(ctx, REG_STACK_PTR);
 	ADDRINT size = ( (ADDRINT *)esp )[3];
-	fprintf(f, "alloc(%lu): 0x%08lx\n", size, addr);
+	fprintf(f, "alloc(" INT_FMT "): " HEX_FMT "\n", size, addr);
 	fflush(f);
 }
 
 VOID do_free(ADDRINT addr)
 {
-	fprintf(f, "free(0x%08lx)\n", addr);
+	fprintf(f, "free(" HEX_FMT ")\n", addr);
 	fflush(f);
 }
 
@@ -65,10 +73,10 @@ VOID ins_instrument(INS ins, VOID *v)
 
 VOID img_instrument(IMG img, VOID *v)
 {
-	fprintf( f, "[*] module 0x%08lx 0x%08lx %s\n", IMG_LowAddress(img), IMG_HighAddress(img), IMG_Name(img).c_str() );
+	fprintf( f, "[*] module " HEX_FMT " " HEX_FMT " %s\n", IMG_LowAddress(img), IMG_HighAddress(img), IMG_Name(img).c_str() );
 	if(need_module && strcasestr( IMG_Name(img).c_str(), need_module ) )
 	{
-		fprintf( f, "[+] module instrumented: 0x%08lx 0x%08lx %s\n", IMG_LowAddress(img), IMG_HighAddress(img), IMG_Name(img).c_str() );
+		fprintf( f, "[+] module instrumented: " HEX_FMT " " HEX_FMT " %s\n", IMG_LowAddress(img), IMG_HighAddress(img), IMG_Name(img).c_str() );
 		low_boundary = IMG_LowAddress(img);
 		high_boundary = IMG_HighAddress(img);
 	}
