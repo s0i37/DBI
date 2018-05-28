@@ -5,10 +5,10 @@
 
 #define VERSION "0.28"
 
-#ifdef __i386__ || _WIN32
+#if defined(__i386__) || defined(_WIN32)
 	#define HEX_FMT "0x%08x"
 	#define INT_FMT "%u"
-#elif __x86_64__ || _WIN64
+#elif defined(__x86_64__) || defined(_WIN64)
 	#define HEX_FMT "0x%08lx"
 	#define INT_FMT "%lu"
 #endif
@@ -68,6 +68,7 @@ VOID do_zwterminateprocess(void)
 VOID ins_instrument(INS ins, VOID *v)
 {
     if( INS_Address(ins) >= low_boundary && INS_Address(ins) <= high_boundary )
+    //if( low_boundary && high_boundary && INS_Address(ins) >= low_boundary && INS_Address(ins) <= high_boundary )
 		INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)dotrace, IARG_CONTEXT, IARG_UINT32, PIN_ThreadId(), IARG_INST_PTR, IARG_UINT32, INS_Size(ins), IARG_END);
 }
 
