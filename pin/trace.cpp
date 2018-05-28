@@ -3,12 +3,12 @@
 #include <stdlib.h>
 #include <iostream>
 
-#define VERSION "0.27"
+#define VERSION "0.28"
 
-#ifdef __i386__
+#ifdef __i386__ || _WIN32
 	#define HEX_FMT "0x%08x"
 	#define INT_FMT "%u"
-#elif __x86_64__
+#elif __x86_64__ || _WIN64
 	#define HEX_FMT "0x%08lx"
 	#define INT_FMT "%lu"
 #endif
@@ -39,7 +39,7 @@ VOID dotrace(CONTEXT *ctx, UINT32 threadid, ADDRINT eip, USIZE opcode_size)
 	fprintf(f, HEX_FMT ":%x {", eip, threadid);
 	for(i = 0; i < opcode_size; i++)
 		fprintf(f, "%02X", ( (unsigned char *) eip )[i] );
-	fprintf(f, "} "HEX_FMT","HEX_FMT","HEX_FMT","HEX_FMT","HEX_FMT","HEX_FMT","HEX_FMT","HEX_FMT"\n", eax,ecx,edx,ebx,esp,ebp,esi,edi);
+	fprintf(f, "} " HEX_FMT "," HEX_FMT "," HEX_FMT "," HEX_FMT "," HEX_FMT "," HEX_FMT "," HEX_FMT "," HEX_FMT "\n", eax,ecx,edx,ebx,esp,ebp,esi,edi);
 	fflush(f);
 }
 
