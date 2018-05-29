@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <iostream>
 
-#define VERSION "0.28"
+#define VERSION "0.29"
 
 #if defined(__i386__) || defined(_WIN32)
 	#define HEX_FMT "0x%08x"
@@ -36,7 +36,7 @@ VOID dotrace(CONTEXT *ctx, UINT32 threadid, ADDRINT eip, USIZE opcode_size)
 	ADDRINT esi = PIN_GetContextReg(ctx, REG_GSI);
 	ADDRINT edi = PIN_GetContextReg(ctx, REG_GDI);
 	
-	fprintf(f, HEX_FMT ":%x {", eip, threadid);
+	fprintf(f, HEX_FMT ":0x%x {", eip, threadid);
 	for(i = 0; i < opcode_size; i++)
 		fprintf(f, "%02X", ( (unsigned char *) eip )[i] );
 	fprintf(f, "} " HEX_FMT "," HEX_FMT "," HEX_FMT "," HEX_FMT "," HEX_FMT "," HEX_FMT "," HEX_FMT "," HEX_FMT "\n", eax,ecx,edx,ebx,esp,ebp,esi,edi);
