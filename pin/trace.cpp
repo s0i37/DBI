@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <iostream>
 
-#define VERSION "0.29"
+#define VERSION "0.30"
 
 #if defined(__i386__) || defined(_WIN32)
 	#define HEX_FMT "0x%08x"
@@ -16,7 +16,7 @@
 FILE *f;
 ADDRINT low_boundary;
 ADDRINT high_boundary;
-const char *need_module;
+string need_module;
 
 KNOB<BOOL> Knob_debug(KNOB_MODE_WRITEONCE,  "pintool", "debug", "0", "Enable debug mode");
 KNOB<string> Knob_outfile(KNOB_MODE_WRITEONCE,  "pintool", "outfile", "trace.txt", "Output file");
@@ -24,7 +24,7 @@ KNOB<ADDRINT> Knob_from(KNOB_MODE_WRITEONCE, "pintool", "from", "0", "start addr
 KNOB<ADDRINT> Knob_to(KNOB_MODE_WRITEONCE, "pintool", "to", "0", "stop address (absolute) for tracing");
 KNOB<string> Knob_module(KNOB_MODE_WRITEONCE,  "pintool", "module", "", "tracing just this module");
 
-VOID dotrace(CONTEXT *ctx, UINT32 threadid, ADDRINT eip, USIZE opcode_size)
+VOID dotrace_exec(CONTEXT *ctx, UINT32 threadid, ADDRINT eip, USIZE opcode_size)
 {
 	unsigned int i;
 	ADDRINT eax = PIN_GetContextReg(ctx, REG_GAX);
@@ -40,6 +40,16 @@ VOID dotrace(CONTEXT *ctx, UINT32 threadid, ADDRINT eip, USIZE opcode_size)
 	for(i = 0; i < opcode_size; i++)
 		fprintf(f, "%02X", ( (unsigned char *) eip )[i] );
 	fprintf(f, "} " HEX_FMT "," HEX_FMT "," HEX_FMT "," HEX_FMT "," HEX_FMT "," HEX_FMT "," HEX_FMT "," HEX_FMT "\n", eax,ecx,edx,ebx,esp,ebp,esi,edi);
+	fflush(f);
+}
+
+VOID dotrace_mem(UINT32 threadid, ADDRINT eip, UINT32 memop_is_written, ADDRINT memop)
+{
+	fprintf(f, HEX_FMT ":0x%x [" HEX_FMT "]", eip, threadid, memop);
+	if(memop_is_written)
+		fprintf(f, " <- " HEX_FMT "\n", *(UINT32 *)memop);
+	else
+		fprintf(f, " -> " HEX_FMT "\n", *(UINT32 *)memop);
 	fflush(f);
 }
 
@@ -67,15 +77,53 @@ VOID do_zwterminateprocess(void)
 
 VOID ins_instrument(INS ins, VOID *v)
 {
-    if( INS_Address(ins) >= low_boundary && INS_Address(ins) <= high_boundary )
-    //if( low_boundary && high_boundary && INS_Address(ins) >= low_boundary && INS_Address(ins) <= high_boundary )
-		INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)dotrace, IARG_CONTEXT, IARG_UINT32, PIN_ThreadId(), IARG_INST_PTR, IARG_UINT32, INS_Size(ins), IARG_END);
+	UINT32 mems_count = INS_MemoryOperandCount(ins);
+    if( (low_boundary == 0 && high_boundary == 0) || (INS_Address(ins) >= low_boundary && INS_Address(ins) <= high_boundary) )
+    {
+    	INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)dotrace_exec, IARG_CONTEXT, IARG_UINT32, PIN_ThreadId(), IARG_INST_PTR, IARG_UINT32, INS_Size(ins), IARG_END);
+    	switch( mems_count )
+    	{
+    		case 1:
+    			INS_InsertCall(
+    				ins,
+    				IPOINT_BEFORE,
+    				(AFUNPTR)dotrace_mem,
+    				IARG_UINT32, PIN_ThreadId(),
+    				IARG_INST_PTR,
+    				IARG_UINT32, INS_MemoryOperandIsWritten(ins, 0) ? 1 : 0,
+    				IARG_MEMORYOP_EA, 0,
+    				IARG_END);
+    			break;
+    		case 2:	
+    			INS_InsertCall(
+    				ins,
+    				IPOINT_BEFORE,
+    				(AFUNPTR)dotrace_mem,
+    				IARG_UINT32, PIN_ThreadId(),
+    				IARG_INST_PTR,
+    				IARG_UINT32, INS_MemoryOperandIsWritten(ins, 0) ? 1 : 0,
+    				IARG_MEMORYOP_EA, 0,
+    				IARG_END);
+    			INS_InsertCall(
+    				ins,
+    				IPOINT_BEFORE,
+    				(AFUNPTR)dotrace_mem,
+    				IARG_UINT32, PIN_ThreadId(),
+    				IARG_INST_PTR,
+    				IARG_UINT32, INS_MemoryOperandIsWritten(ins, 1) ? 1 : 0,
+    				IARG_MEMORYOP_EA, 1,
+    				IARG_END);
+    			break;
+    		case 3: printf("3 MemoryOperandCount\n");
+    				break;
+    	}
+    }
 }
 
 VOID img_instrument(IMG img, VOID *v)
 {
 	fprintf( f, "[*] module " HEX_FMT " " HEX_FMT " %s\n", IMG_LowAddress(img), IMG_HighAddress(img), IMG_Name(img).c_str() );
-	if(need_module && strcasestr( IMG_Name(img).c_str(), need_module ) )
+	if(need_module != "" && strcasestr( IMG_Name(img).c_str(), need_module.c_str() ) )
 	{
 		fprintf( f, "[+] module instrumented: " HEX_FMT " " HEX_FMT " %s\n", IMG_LowAddress(img), IMG_HighAddress(img), IMG_Name(img).c_str() );
 		low_boundary = IMG_LowAddress(img);
@@ -124,7 +172,7 @@ int main(int argc, char ** argv)
 	
 	low_boundary = Knob_from.Value();
     high_boundary = Knob_to.Value();
-    need_module = Knob_module.Value().c_str();
+    need_module = Knob_module.Value();
 	outfile_name = Knob_outfile.Value().c_str();
 	f = fopen(outfile_name, "w");
 
