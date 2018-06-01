@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <iostream>
 
-#define VERSION "0.30"
+#define VERSION "0.32"
 
 #if defined(__i386__) || defined(_WIN32)
 	#define HEX_FMT "0x%08x"
@@ -38,85 +38,93 @@ VOID dotrace_exec(CONTEXT *ctx, UINT32 threadid, ADDRINT eip, USIZE opcode_size)
 	
 	fprintf(f, HEX_FMT ":0x%x {", eip, threadid);
 	for(i = 0; i < opcode_size; i++)
-		fprintf(f, "%02X", ( (unsigned char *) eip )[i] );
+		fprintf( f, "%02X", ( (unsigned char *) eip )[i] );
 	fprintf(f, "} " HEX_FMT "," HEX_FMT "," HEX_FMT "," HEX_FMT "," HEX_FMT "," HEX_FMT "," HEX_FMT "," HEX_FMT "\n", eax,ecx,edx,ebx,esp,ebp,esi,edi);
 	fflush(f);
 }
 
-VOID dotrace_mem(UINT32 threadid, ADDRINT eip, UINT32 memop_is_written, ADDRINT memop)
+VOID dotrace_mem_read(UINT32 threadid, ADDRINT eip, ADDRINT memop, UINT32 size)
 {
-	fprintf(f, HEX_FMT ":0x%x [" HEX_FMT "]", eip, threadid, memop);
-	if(memop_is_written)
-		fprintf(f, " <- " HEX_FMT "\n", *(UINT32 *)memop);
-	else
-		fprintf(f, " -> " HEX_FMT "\n", *(UINT32 *)memop);
+	fprintf(f, HEX_FMT ":0x%x [" HEX_FMT "] -> ", eip, threadid, memop);
+	switch(size)
+	{
+		case 1:
+			fprintf( f, "0x%02x\n", *(unsigned char *)memop );
+			break;
+		case 2:
+			fprintf( f, "0x%04x\n", *(unsigned short *)memop );
+			break;
+		case 4:
+			fprintf( f, "0x%08x\n", *(unsigned int *)memop );
+			break;
+		case 8:
+			fprintf( f, "0x%08x", *(unsigned int *)memop );
+			fprintf( f, "%08x\n", *( ((unsigned int *)memop) + 1 ) );
+			break;
+
+	}
 	fflush(f);
 }
 
-
-VOID do_malloc(CONTEXT * ctx, ADDRINT addr)
+VOID dotrace_mem_write(UINT32 threadid, ADDRINT eip, ADDRINT memop, UINT32 size)
 {
-	ADDRINT esp = PIN_GetContextReg(ctx, REG_STACK_PTR);
-	ADDRINT size = ( (ADDRINT *)esp )[3];
-	fprintf(f, "alloc(" INT_FMT "): " HEX_FMT "\n", size, addr);
-	fflush(f);
-}
+	fprintf(f, HEX_FMT ":0x%x [" HEX_FMT "] <- ", eip, threadid, memop);
+	switch(size)
+	{
+		case 1:
+			fprintf( f, "0x%02x\n", *(unsigned char *)memop );
+			break;
+		case 2:
+			fprintf( f, "0x%04x\n", *(unsigned short *)memop );
+			break;
+		case 4:
+			fprintf( f, "0x%08x\n", *(unsigned int *)memop );
+			break;
+		case 8:
+			fprintf( f, "0x%08x", *(unsigned int *)memop );
+			fprintf( f, "%08x\n", *( ((unsigned int *)memop) + 1 ) );
+			break;
 
-VOID do_free(ADDRINT addr)
-{
-	fprintf(f, "free(" HEX_FMT ")\n", addr);
+	}
 	fflush(f);
-}
-
-VOID do_zwterminateprocess(void)
-{
-	fflush(f);
-	fclose(f);
 }
 
 
 VOID ins_instrument(INS ins, VOID *v)
 {
-	UINT32 mems_count = INS_MemoryOperandCount(ins);
     if( (low_boundary == 0 && high_boundary == 0) || (INS_Address(ins) >= low_boundary && INS_Address(ins) <= high_boundary) )
     {
     	INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)dotrace_exec, IARG_CONTEXT, IARG_UINT32, PIN_ThreadId(), IARG_INST_PTR, IARG_UINT32, INS_Size(ins), IARG_END);
-    	switch( mems_count )
-    	{
-    		case 1:
+    	if( INS_IsMemoryRead(ins) )
     			INS_InsertCall(
     				ins,
     				IPOINT_BEFORE,
-    				(AFUNPTR)dotrace_mem,
+    				(AFUNPTR)dotrace_mem_read,
     				IARG_UINT32, PIN_ThreadId(),
     				IARG_INST_PTR,
-    				IARG_UINT32, INS_MemoryOperandIsWritten(ins, 0) ? 1 : 0,
-    				IARG_MEMORYOP_EA, 0,
+    				IARG_MEMORYREAD_EA,
+    				IARG_MEMORYREAD_SIZE,
     				IARG_END);
-    			break;
-    		case 2:	
+    	if( INS_HasMemoryRead2(ins) )
+            	INS_InsertCall(
+            		ins,
+            		IPOINT_BEFORE,
+            		(AFUNPTR)dotrace_mem_read,
+					IARG_UINT32, PIN_ThreadId(),
+    				IARG_INST_PTR,
+					IARG_MEMORYREAD2_EA,
+					IARG_MEMORYREAD_SIZE,
+					IARG_END);
+    	if( INS_IsMemoryWrite(ins) )
     			INS_InsertCall(
     				ins,
     				IPOINT_BEFORE,
-    				(AFUNPTR)dotrace_mem,
+    				(AFUNPTR)dotrace_mem_write,
     				IARG_UINT32, PIN_ThreadId(),
     				IARG_INST_PTR,
-    				IARG_UINT32, INS_MemoryOperandIsWritten(ins, 0) ? 1 : 0,
-    				IARG_MEMORYOP_EA, 0,
+    				IARG_MEMORYWRITE_EA,
+    				IARG_MEMORYWRITE_SIZE,
     				IARG_END);
-    			INS_InsertCall(
-    				ins,
-    				IPOINT_BEFORE,
-    				(AFUNPTR)dotrace_mem,
-    				IARG_UINT32, PIN_ThreadId(),
-    				IARG_INST_PTR,
-    				IARG_UINT32, INS_MemoryOperandIsWritten(ins, 1) ? 1 : 0,
-    				IARG_MEMORYOP_EA, 1,
-    				IARG_END);
-    			break;
-    		case 3: printf("3 MemoryOperandCount\n");
-    				break;
-    	}
     }
 }
 
@@ -129,32 +137,6 @@ VOID img_instrument(IMG img, VOID *v)
 		low_boundary = IMG_LowAddress(img);
 		high_boundary = IMG_HighAddress(img);
 	}
-	/*
-	if( strstr( IMG_Name(img).c_str(), "ntdll.dll" ) )
-	{
-		RTN allocate_heap = RTN_FindByName(img, "RtlAllocateHeap");
-		if( allocate_heap.is_valid() )
-		{
-			RTN_Open( allocate_heap );
-			RTN_InsertCall(allocate_heap, IPOINT_AFTER, (AFUNPTR)do_malloc, IARG_CONTEXT, IARG_FUNCRET_EXITPOINT_VALUE, IARG_END );
-			RTN_Close( allocate_heap );
-		}
-		RTN free_heap = RTN_FindByName(img, "RtlFreeHeap");
-		if( free_heap.is_valid() )
-		{
-			RTN_Open( free_heap );
-			RTN_InsertCall( free_heap, IPOINT_BEFORE, (AFUNPTR)do_free, IARG_FUNCARG_ENTRYPOINT_VALUE, 2, IARG_END );
-			RTN_Close( free_heap );
-		}
-		RTN terminate_process = RTN_FindByName(img, "ZwTerminateProcess");
-		if( terminate_process.is_valid() )
-		{
-			RTN_Open( terminate_process );
-			RTN_InsertCall( terminate_process, IPOINT_BEFORE, (AFUNPTR)do_zwterminateprocess, IARG_END );
-			RTN_Close( terminate_process );
-		}
-	}
-	*/
 	fflush(f);
 }
 
@@ -162,6 +144,13 @@ VOID fini(INT32 code, VOID *v)
 {
 	fflush(f);
 	fclose(f);
+}
+
+EXCEPT_HANDLING_RESULT internal_exception(THREADID tid, EXCEPTION_INFO *pExceptInfo, PHYSICAL_CONTEXT *pPhysCtxt, VOID *v)
+{
+  fprintf( f, "! " HEX_FMT "\n", PIN_GetPhysicalContextReg(pPhysCtxt, REG_INST_PTR) );
+  fflush(f);
+  return EHR_UNHANDLED;
 }
 
 int main(int argc, char ** argv)
@@ -175,10 +164,14 @@ int main(int argc, char ** argv)
     need_module = Knob_module.Value();
 	outfile_name = Knob_outfile.Value().c_str();
 	f = fopen(outfile_name, "w");
+	fprintf(f, "EIP:THREAD_ID {OPCODE} EAX,ECX,EDX,EBX,ESP,EBP,ESI,EDI\n");
+	fprintf(f, "EIP:THREAD_ID [MEMORY] -> READED_VALUE\n");
+	fprintf(f, "EIP:THREAD_ID [MEMORY] <- WRITED_VALUE\n");
 
 	PIN_InitSymbols();
 	IMG_AddInstrumentFunction(img_instrument, 0);
 	INS_AddInstrumentFunction(ins_instrument, 0);
+	PIN_AddInternalExceptionHandler(internal_exception, 0);
 	PIN_AddFiniFunction(fini, 0);
 	PIN_StartProgram();
 	return 0;
