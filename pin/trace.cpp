@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <iostream>
 
-#define VERSION "0.32"
+#define VERSION "0.33"
 
 #if defined(__i386__) || defined(_WIN32)
 	#define HEX_FMT "0x%08x"
@@ -17,6 +17,7 @@ FILE *f;
 ADDRINT low_boundary;
 ADDRINT high_boundary;
 string need_module;
+long long int takt = 0;
 
 KNOB<BOOL> Knob_debug(KNOB_MODE_WRITEONCE,  "pintool", "debug", "0", "Enable debug mode");
 KNOB<string> Knob_outfile(KNOB_MODE_WRITEONCE,  "pintool", "outfile", "trace.txt", "Output file");
@@ -36,7 +37,8 @@ VOID dotrace_exec(CONTEXT *ctx, UINT32 threadid, ADDRINT eip, USIZE opcode_size)
 	ADDRINT esi = PIN_GetContextReg(ctx, REG_GSI);
 	ADDRINT edi = PIN_GetContextReg(ctx, REG_GDI);
 	
-	fprintf(f, HEX_FMT ":0x%x {", eip, threadid);
+	takt += 1;
+	fprintf(f, "%lli:" HEX_FMT ":0x%x {", takt, eip, threadid);
 	for(i = 0; i < opcode_size; i++)
 		fprintf( f, "%02X", ( (unsigned char *) eip )[i] );
 	fprintf(f, "} " HEX_FMT "," HEX_FMT "," HEX_FMT "," HEX_FMT "," HEX_FMT "," HEX_FMT "," HEX_FMT "," HEX_FMT "\n", eax,ecx,edx,ebx,esp,ebp,esi,edi);
@@ -45,7 +47,7 @@ VOID dotrace_exec(CONTEXT *ctx, UINT32 threadid, ADDRINT eip, USIZE opcode_size)
 
 VOID dotrace_mem_read(UINT32 threadid, ADDRINT eip, ADDRINT memop, UINT32 size)
 {
-	fprintf(f, HEX_FMT ":0x%x [" HEX_FMT "] -> ", eip, threadid, memop);
+	fprintf(f, "%lli:" HEX_FMT ":0x%x [" HEX_FMT "] -> ", takt, eip, threadid, memop);
 	switch(size)
 	{
 		case 1:
@@ -68,7 +70,7 @@ VOID dotrace_mem_read(UINT32 threadid, ADDRINT eip, ADDRINT memop, UINT32 size)
 
 VOID dotrace_mem_write(UINT32 threadid, ADDRINT eip, ADDRINT memop, UINT32 size)
 {
-	fprintf(f, HEX_FMT ":0x%x [" HEX_FMT "] <- ", eip, threadid, memop);
+	fprintf(f, "%lli:" HEX_FMT ":0x%x [" HEX_FMT "] <- ", takt, eip, threadid, memop);
 	switch(size)
 	{
 		case 1:
@@ -164,9 +166,9 @@ int main(int argc, char ** argv)
     need_module = Knob_module.Value();
 	outfile_name = Knob_outfile.Value().c_str();
 	f = fopen(outfile_name, "w");
-	fprintf(f, "EIP:THREAD_ID {OPCODE} EAX,ECX,EDX,EBX,ESP,EBP,ESI,EDI\n");
-	fprintf(f, "EIP:THREAD_ID [MEMORY] -> READED_VALUE\n");
-	fprintf(f, "EIP:THREAD_ID [MEMORY] <- WRITED_VALUE\n");
+	fprintf(f, "TAKT:EIP:THREAD_ID {OPCODE} EAX,ECX,EDX,EBX,ESP,EBP,ESI,EDI\n");
+	fprintf(f, "TAKT:EIP:THREAD_ID [MEMORY] -> READED_VALUE\n");
+	fprintf(f, "TAKT:EIP:THREAD_ID [MEMORY] <- WRITED_VALUE\n");
 
 	PIN_InitSymbols();
 	IMG_AddInstrumentFunction(img_instrument, 0);
