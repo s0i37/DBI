@@ -150,7 +150,8 @@ VOID fini(INT32 code, VOID *v)
 
 EXCEPT_HANDLING_RESULT internal_exception(THREADID tid, EXCEPTION_INFO *pExceptInfo, PHYSICAL_CONTEXT *pPhysCtxt, VOID *v)
 {
-  fprintf( f, "! " HEX_FMT "\n", PIN_GetPhysicalContextReg(pPhysCtxt, REG_INST_PTR) );
+  //fprintf( f, "! " HEX_FMT "\n", PIN_GetPhysicalContextReg(pPhysCtxt, REG_INST_PTR) );
+  fprintf(f, "!\n");
   fflush(f);
   return EHR_UNHANDLED;
 }
