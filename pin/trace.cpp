@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <iostream>
+#include <list>
 
 #define VERSION "0.33"
 
@@ -18,6 +19,7 @@ ADDRINT low_boundary;
 ADDRINT high_boundary;
 string need_module;
 long long int takt = 0;
+list <string> functions;
 
 KNOB<BOOL> Knob_debug(KNOB_MODE_WRITEONCE,  "pintool", "debug", "0", "Enable debug mode");
 KNOB<string> Knob_outfile(KNOB_MODE_WRITEONCE,  "pintool", "outfile", "trace.txt", "Output file");
@@ -132,6 +134,8 @@ VOID ins_instrument(INS ins, VOID *v)
 
 VOID img_instrument(IMG img, VOID *v)
 {
+	RTN ptr;
+	list <string>::iterator function_name;
 	fprintf( f, "[*] module " HEX_FMT " " HEX_FMT " %s\n", IMG_LowAddress(img), IMG_HighAddress(img), IMG_Name(img).c_str() );
 	if(need_module != "" && strcasestr( IMG_Name(img).c_str(), need_module.c_str() ) )
 	{
@@ -140,6 +144,17 @@ VOID img_instrument(IMG img, VOID *v)
 		high_boundary = IMG_HighAddress(img);
 	}
 	fflush(f);
+
+	for(function_name = functions.begin(); function_name != functions.end(); function_name++)
+	{
+		ptr = RTN_FindByName(img, (*function_name).c_str());
+		if( ptr.is_valid() )
+		{
+			RTN_Open(ptr);
+			fprintf(f, "[*] function %s " HEX_FMT "\n", RTN_Name(ptr).c_str(), RTN_Address(ptr) );
+			RTN_Close(ptr);
+		}
+	}
 }
 
 VOID fini(INT32 code, VOID *v)
@@ -162,6 +177,9 @@ int main(int argc, char ** argv)
 	if( PIN_Init(argc, argv) )
 		return -1;
 	
+	functions.push_back("malloc");
+	functions.push_back("free");
+
 	low_boundary = Knob_from.Value();
     high_boundary = Knob_to.Value();
     need_module = Knob_module.Value();
