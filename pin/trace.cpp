@@ -134,7 +134,8 @@ VOID ins_instrument(INS ins, VOID *v)
 
 VOID img_instrument(IMG img, VOID *v)
 {
-	RTN ptr;
+	SEC sec;
+	RTN rtn;
 	list <string>::iterator function_name;
 	fprintf( f, "[*] module " HEX_FMT " " HEX_FMT " %s\n", IMG_LowAddress(img), IMG_HighAddress(img), IMG_Name(img).c_str() );
 	if(need_module != "" && strcasestr( IMG_Name(img).c_str(), need_module.c_str() ) )
@@ -145,7 +146,15 @@ VOID img_instrument(IMG img, VOID *v)
 	}
 	fflush(f);
 
-	for(function_name = functions.begin(); function_name != functions.end(); function_name++)
+	for( sec = IMG_SecHead(img); SEC_Valid(sec); sec = SEC_Next(sec) )
+		for( rtn = SEC_RtnHead(sec); RTN_Valid(rtn); rtn = RTN_Next(rtn) )
+		{
+			RTN_Open(rtn);
+			fprintf(f, "[*] function %s " HEX_FMT "\n", RTN_Name(rtn).c_str(), RTN_Address(rtn) );
+			RTN_Close(rtn);
+		}
+
+	/*for(function_name = functions.begin(); function_name != functions.end(); function_name++)
 	{
 		ptr = RTN_FindByName(img, (*function_name).c_str());
 		if( ptr.is_valid() )
@@ -154,7 +163,7 @@ VOID img_instrument(IMG img, VOID *v)
 			fprintf(f, "[*] function %s " HEX_FMT "\n", RTN_Name(ptr).c_str(), RTN_Address(ptr) );
 			RTN_Close(ptr);
 		}
-	}
+	}*/
 }
 
 VOID fini(INT32 code, VOID *v)
@@ -185,9 +194,9 @@ int main(int argc, char ** argv)
     need_module = Knob_module.Value();
 	outfile_name = Knob_outfile.Value().c_str();
 	f = fopen(outfile_name, "w");
-	fprintf(f, "TAKT:EIP:THREAD_ID {OPCODE} EAX,ECX,EDX,EBX,ESP,EBP,ESI,EDI\n");
-	fprintf(f, "TAKT:EIP:THREAD_ID [MEMORY] -> READED_VALUE\n");
-	fprintf(f, "TAKT:EIP:THREAD_ID [MEMORY] <- WRITED_VALUE\n");
+	fprintf(f, "[#] TAKT:EIP:THREAD_ID {OPCODE} EAX,ECX,EDX,EBX,ESP,EBP,ESI,EDI\n");
+	fprintf(f, "[#] TAKT:EIP:THREAD_ID [MEMORY] -> READED_VALUE\n");
+	fprintf(f, "[#] TAKT:EIP:THREAD_ID [MEMORY] <- WRITED_VALUE\n");
 
 	PIN_InitSymbols();
 	IMG_AddInstrumentFunction(img_instrument, 0);
