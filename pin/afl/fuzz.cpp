@@ -342,6 +342,8 @@ bool read_from_pipe()
     }
     if( (int)fuzz_data.len == 0 )
         return false;
+    if(Knob_debug)
+        write(1, fuzz_data.data, fuzz_data.len);
     return true;
 }
 #endif
