@@ -150,7 +150,7 @@ VOID img_instrument(IMG img, VOID *v)
 		for( rtn = SEC_RtnHead(sec); RTN_Valid(rtn); rtn = RTN_Next(rtn) )
 		{
 			RTN_Open(rtn);
-			fprintf(f, "[*] function %s " HEX_FMT "\n", RTN_Name(rtn).c_str(), RTN_Address(rtn) );
+			fprintf(f, "[*] function %s " HEX_FMT " " INT_FMT "\n", RTN_Name(rtn).c_str(), RTN_Address(rtn), RTN_Range(rtn) );
 			RTN_Close(rtn);
 		}
 
