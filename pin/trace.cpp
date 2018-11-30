@@ -4,7 +4,7 @@
 #include <iostream>
 #include <list>
 
-#define VERSION "0.33"
+#define VERSION "0.35"
 
 #if defined(__i386__) || defined(_WIN32)
 	#define HEX_FMT "0x%08x"
@@ -137,7 +137,7 @@ VOID img_instrument(IMG img, VOID *v)
 	SEC sec;
 	RTN rtn;
 	list <string>::iterator function_name;
-	fprintf( f, "[*] module " HEX_FMT " " HEX_FMT " %s\n", IMG_LowAddress(img), IMG_HighAddress(img), IMG_Name(img).c_str() );
+	fprintf( f, "[*] module %s " HEX_FMT " " HEX_FMT "\n", IMG_Name(img).c_str(), IMG_LowAddress(img), IMG_HighAddress(img) );
 	if(need_module != "" && strcasestr( IMG_Name(img).c_str(), need_module.c_str() ) )
 	{
 		fprintf( f, "[+] module instrumented: " HEX_FMT " " HEX_FMT " %s\n", IMG_LowAddress(img), IMG_HighAddress(img), IMG_Name(img).c_str() );
@@ -150,7 +150,7 @@ VOID img_instrument(IMG img, VOID *v)
 		for( rtn = SEC_RtnHead(sec); RTN_Valid(rtn); rtn = RTN_Next(rtn) )
 		{
 			RTN_Open(rtn);
-			fprintf(f, "[*] function %s " HEX_FMT " " INT_FMT "\n", RTN_Name(rtn).c_str(), RTN_Address(rtn), RTN_Range(rtn) );
+			fprintf(f, "[*] function %s " HEX_FMT " " HEX_FMT "\n", RTN_Name(rtn).c_str(), RTN_Address(rtn), RTN_Address(rtn) + RTN_Range(rtn) );
 			RTN_Close(rtn);
 		}
 
@@ -206,3 +206,9 @@ int main(int argc, char ** argv)
 	PIN_StartProgram();
 	return 0;
 }
+
+/*
+TODO:
+нужна обратная связь через pipe (tracectl) для отметки временных моментов (напр. перед подачей данных и после)
+fprintf(f, "[*] event %s\n", event_name);
+*/
