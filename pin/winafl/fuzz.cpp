@@ -7,6 +7,12 @@
 #define FUZZ_DATA_SIZE 0x1000
 #define MAP_SIZE    (1 << 16)
 
+#ifdef _WIN64
+    #define __win__ 1
+#elif _WIN32
+    #define __win__ 1
+#endif
+
 #if defined(__i386__) || defined(_WIN32)
     #define HEX_FMT "0x%08x"
     #define INT_FMT "%u"
@@ -16,18 +22,14 @@
     #define INT_FMT "%lu"
 #endif
 
-#include <sys/shm.h>
-#include <sys/wait.h>
-#include <unistd.h>
-#include <limits.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <signal.h>
-int afl_sync_fd = -1;
-int afl_data_fd = -1;
-bool read_from_pipe();
-bool write_to_pipe(char *);
+
+namespace windows {
+    #include <Windows.h>
+    HANDLE pipe_sync = INVALID_HANDLE_VALUE, pipe_data;
+    char read_from_pipe();
+    void write_to_pipe(char);
+    void get_fuzz_data();
+}
 
 
 CONTEXT snapshot;
@@ -69,14 +71,18 @@ KNOB<ADDRINT> Knob_entry(KNOB_MODE_WRITEONCE, "pintool", "entry", "0", "start ad
 KNOB<ADDRINT> Knob_exit(KNOB_MODE_WRITEONCE, "pintool", "exit", "0", "stop address for coverage signal");
 KNOB<string> Knob_module(KNOB_MODE_WRITEONCE, "pintool", "module", "", "fuzz just this module");
 
-
-VOID get_fuzz_data();
+/*
+void randomizeREG(CONTEXT * ctx, ADDRINT nextAddr)
+{
+	PIN_SetContextReg(ctx, REG_EDX, fuzz_iters);
+}
+*/
 
 void FUZZ(CONTEXT *ctx)
 {
     if(Knob_debug)
       printf("[*] waiting of fuzz data\n");
-	get_fuzz_data(); /* WAIT */
+	windows::get_fuzz_data(); /* WAIT */
 	ADDRINT eax = PIN_GetContextReg(ctx, REG_GCX);
 	for(unsigned int i = 0; i < fuzz_data.len; i++)
 		((unsigned char *)eax)[i] = ((char *)fuzz_data.data)[i];
@@ -116,36 +122,12 @@ inline ADDRINT valid_addr(ADDRINT addr)
     return false;
 }
 
-// afl/wrap ожидает конец обработки в target
-VOID fuzzer_synchronization(char *cmd)
-{
-    write_to_pipe(cmd);
-}
-// target/instrumentation ожидает новых данных от afl/wrap через pipe
-VOID get_fuzz_data()
-{
-    while(1)
-    {
-        int result;
-        result = read_from_pipe();
-        if(! result)
-        {
-            if (Knob_debug)
-                printf("[*] reopen afl_data\n");
-            close(afl_data_fd);
-            afl_data_fd = open("afl_data", O_RDONLY);
-        }
-        else
-            break;
-    }
-    //printf("fuzz_data.len = %d\n", fuzz_data.len);
-    //write(1, fuzz_data.data, fuzz_data.len);
-}
 
 void exec_instr(ADDRINT addr, CONTEXT * ctx)
 {
 	//if( addr >= 0x401000 && addr <= 0x401024 )
 	//printf(HEX_FMT "\n", addr - min_addr);
+    char command;
 
     if(was_crash)
     {
@@ -158,6 +140,11 @@ void exec_instr(ADDRINT addr, CONTEXT * ctx)
 
 	if(addr - min_addr == entry_addr && in_fuzz_area == FALSE)
 	{
+        windows::write_to_pipe('P');
+        command = windows::read_from_pipe();
+        if(command == 'Q')
+            PIN_ExitApplication(0);
+
 		in_fuzz_area = TRUE;
 		PIN_SaveContext(ctx, &snapshot);
 		is_saved_snapshot = TRUE;
@@ -171,7 +158,7 @@ void exec_instr(ADDRINT addr, CONTEXT * ctx)
 		in_fuzz_area = FALSE;
         if (Knob_debug)
           printf("[*] fuzz iteration " INT_FMT " finished\n", fuzz_iters);
-        fuzzer_synchronization( (char *) "e" );
+        windows::write_to_pipe('K');
 		if(is_saved_snapshot)
 			PIN_SaveContext(&snapshot, ctx);
 		is_saved_snapshot = FALSE;
@@ -262,62 +249,92 @@ VOID trace_intrument(TRACE trace, VOID *v)
 }
 
 
-void reopen_pipe(int signal)
-{
-    if (Knob_debug)
-        printf("[*] reopen afl_sync\n");
-    afl_sync_fd = open("afl_sync", O_WRONLY);
-}
-bool write_to_pipe(char *cmd)
-{
-    //if( access("afl_sync", F_OK ) == -1 )
-    //    mkfifo("afl_sync", 777);  сделать RETURN
-    if(afl_sync_fd == -1)
-        afl_sync_fd = open("afl_sync", O_WRONLY);
-    write(afl_sync_fd, cmd, 1); /* SIGPIPE */
-    return true;
-}
-bool read_from_pipe()
-{
-    unsigned int num;
-    if(afl_data_fd == -1)
-       afl_data_fd = open("afl_data", O_RDONLY);
-    fuzz_data.len = 0;
-    while( ( num = read(afl_data_fd, fuzz_data.data, FUZZ_DATA_SIZE)) > 0 ) /* WAIT */
-   	{
-        fuzz_data.len += num;
-    }
-    if( (int)fuzz_data.len == 0 )
-        return false;
-    if(Knob_debug)
+namespace windows {
+    void write_to_pipe(char cmd)
     {
-        write(1, "[+] fuzz data: ", sizeof("[+] fuzz data: "));
-        write(1, fuzz_data.data, fuzz_data.len);
-    }
-    return true;
-}
+        DWORD num_written;
 
-bool setup_shm() {
-    if (char *shm_key_str = getenv("__AFL_SHM_ID")) {
-        int shm_id, shm_key;
-        shm_key = atoi(shm_key_str);
-        if(Knob_debug)
-            std::cout << "[*] shm_key: " << shm_key << std::endl;        
-	
-        if( ( shm_id = shmget( (key_t)shm_key, MAP_SIZE, IPC_CREAT | IPC_EXCL | 0600 ) ) < 0 )  // try create by key
-            shm_id = shmget( (key_t)shm_key, MAP_SIZE, IPC_EXCL | 0600 );  // find by key
-        bitmap_shm = reinterpret_cast<uint8_t*>(shmat(shm_id, 0, 0));
-        
-        if (bitmap_shm == reinterpret_cast<void *>(-1)) {
-            std::cout << "failed to get shm addr from shmmat()" << std::endl;
-            return false;
-        }
+        if(pipe_sync == INVALID_HANDLE_VALUE)
+            /* open existed pipe */
+            pipe_sync = CreateFile(
+                "\\\\.\\pipe\\afl_pipe_default",// pipe name
+                GENERIC_READ|GENERIC_WRITE,     // read and write access
+                0,                              // no sharing
+                NULL,                           // default security attributes
+                OPEN_EXISTING,                  // opens existing pipe
+                0,                              // default attributes
+                NULL);
+
+        ConnectNamedPipe(pipe_sync, NULL); /* WAIT */
+        WriteFile(pipe_sync, &cmd, 1, &num_written, NULL);
+        DisconnectNamedPipe(pipe_sync);
+
     }
-    else {
-        std::cout << "failed to get shm_id envvar" << std::endl;
-        return false;
+    char read_from_pipe()
+    {
+        DWORD num_read;
+        char result;
+
+        ConnectNamedPipe(pipe_sync, NULL); /* WAIT */
+        ReadFile(pipe_sync, &result, 1, &num_read, NULL);
+        DisconnectNamedPipe(pipe_sync);
+        return result;
     }
-    return true;
+
+    // target/instrumentation WAIT новых данных от afl/wrap через pipe
+    void get_fuzz_data()
+    {
+        ConnectNamedPipe(pipe_data, NULL); /* WAIT */
+        ReadFile(pipe_data, fuzz_data.data, FUZZ_DATA_SIZE, (LPDWORD)&fuzz_data.len, NULL);
+        DisconnectNamedPipe(pipe_data);
+    }
+
+    void setup_pipe()
+    {
+        /* create new pipe */
+        pipe_sync = CreateNamedPipe(
+            "\\\\.\\pipe\\afl_pipe_default",// pipe name
+            PIPE_ACCESS_DUPLEX |            // read/write access 
+            FILE_FLAG_OVERLAPPED,           // overlapped mode 
+            0,
+            1,                              // max. instances
+            512,                            // output buffer size
+            512,                            // input buffer size
+            20000,                          // client time-out
+            NULL);
+
+        /* create new pipe */
+        pipe_data = CreateNamedPipe(
+            "\\\\.\\pipe\\afl_data",        // pipe name
+            PIPE_ACCESS_DUPLEX |            // read/write access 
+            FILE_FLAG_OVERLAPPED,           // overlapped mode 
+            0,
+            1,                              // max. instances
+            512,                            // output buffer size
+            512,                            // input buffer size
+            20000,                          // client time-out
+            NULL);
+    }
+
+    void setup_shm()
+    {
+        HANDLE map_file;
+                   // (char *)"Local\\winapi-shm-1337");
+        map_file = CreateFileMapping(
+                   INVALID_HANDLE_VALUE,    // use paging file
+                   NULL,                    // default security
+                   PAGE_READWRITE,          // read/write access
+                   0,                       // maximum object size (high-order DWORD)
+                   MAP_SIZE,                // maximum object size (low-order DWORD)
+                   (char *)"afl_shm_default");        // name of mapping object
+
+        bitmap_shm = (unsigned char *) MapViewOfFile(map_file, // handle to map object
+                FILE_MAP_ALL_ACCESS,  // read/write permission
+                0,
+                0,
+                MAP_SIZE);
+        memset(bitmap_shm, '\x00', MAP_SIZE);
+    }
 }
 
 void dump_registers(CONTEXT *ctx)
@@ -343,16 +360,21 @@ void dump_registers(CONTEXT *ctx)
         , rax, rcx, rdx, rbx, rsp, rbp, rsi, rdi, rip);
 }
 
-bool on_crash(unsigned int threadId, int sig, CONTEXT* ctx, bool hasHandler, const EXCEPTION_INFO* pExceptInfo, void* v)
+void context_change(THREADID tid, CONTEXT_CHANGE_REASON reason, const CONTEXT *ctxtFrom, CONTEXT *ctxtTo, INT32 info, VOID *v)
 {
-    if(Knob_debug)
+    if(reason == CONTEXT_CHANGE_REASON_EXCEPTION)
     {
-        printf("[!] signal %d\n", sig);
-        dump_registers(ctx);
+        if (Knob_debug)
+        {
+            printf("[!] exception " HEX_FMT "\n", info);
+            dump_registers(ctxtTo);
+        }
+        if(info == 0xc0000005)
+        {
+            windows::write_to_pipe('C');
+            was_crash = true;
+        }
     }
-    was_crash = true;
-    fuzzer_synchronization( (char *) "c" );
-    return false;            /* no pass signal to application */
 }
 
 EXCEPT_HANDLING_RESULT internal_exception(THREADID tid, EXCEPTION_INFO *pExceptInfo, PHYSICAL_CONTEXT *pPhysCtxt, VOID *v)
@@ -421,8 +443,8 @@ void fini(INT32 code, VOID *v)
 {
     if (Knob_debug)
 	   printf("[*] end\n");
-	fflush(f);
-	fclose(f);
+	//fflush(f);
+	//fclose(f);
 }
 
 INT32 Usage()
@@ -436,14 +458,14 @@ INT32 Usage()
 
 int main(int argc, char ** argv)
 {
-	f = fopen("fuzz.log", "w");
+	//f = fopen("fuzz.log", "w");
 	if(PIN_Init(argc, argv))
         return Usage();
 
     fuzz_data.data = malloc(FUZZ_DATA_SIZE);
 
-    setup_shm();
-    signal(SIGPIPE, reopen_pipe);
+    windows::setup_pipe();
+    windows::setup_shm();
 
     entry_addr = Knob_entry.Value();
     exit_addr = Knob_exit.Value();
@@ -451,7 +473,7 @@ int main(int argc, char ** argv)
 
 	INS_AddInstrumentFunction(ins_instrument, 0);
 	TRACE_AddInstrumentFunction(trace_intrument, 0);
-    PIN_InterceptSignal(SIGSEGV, on_crash, 0);
+    PIN_AddContextChangeFunction(context_change, 0);
 	//PIN_AddInternalExceptionHandler(internal_exception, 0);
 	PIN_AddApplicationStartFunction(entry_point, 0);
 	PIN_AddFiniFunction(fini, 0);
@@ -460,6 +482,6 @@ int main(int argc, char ** argv)
 }
 
 /*
-    linux named pipe performance: > 1M/s
-    pure PIN in-memory speed: 50k/s
+    windows pipe performance: ~25k/s
+    pure PIN in-memory speed: 15k/s
 */
