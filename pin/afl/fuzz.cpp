@@ -3,7 +3,7 @@
 #include <list>
 #include <iostream>
 
-#define VERSION "0.17"
+#define VERSION "0.19"
 #define FUZZ_DATA_SIZE 0x1000
 #define MAP_SIZE    (1 << 16)
 
@@ -39,6 +39,8 @@ ADDRINT max_addr = 0;
 ADDRINT entry_addr = 0;
 ADDRINT exit_addr = 0;
 string need_module;
+unsigned char original_fuzzed_data[FUZZ_DATA_SIZE];
+unsigned int previous_fuzz_data_len = 0;
 
 unsigned char bitmap[MAP_SIZE];
 uint8_t *bitmap_shm = 0;
@@ -74,12 +76,25 @@ VOID get_fuzz_data();
 
 void FUZZ(CONTEXT *ctx)
 {
+    unsigned int i;
     if(Knob_debug)
       printf("[*] waiting of fuzz data\n");
 	get_fuzz_data(); /* WAIT */
-	ADDRINT eax = PIN_GetContextReg(ctx, REG_GCX);
-	for(unsigned int i = 0; i < fuzz_data.len; i++)
-		((unsigned char *)eax)[i] = ((char *)fuzz_data.data)[i];
+	ADDRINT data_pointer = PIN_GetContextReg(ctx, REG_GAX);
+
+    /* save virgin data values */
+    for(i = previous_fuzz_data_len; i < fuzz_data.len; i++)
+        original_fuzzed_data[i] = ((unsigned char *)data_pointer)[i];
+
+    /* insert fuzz data values */
+	for(i = 0; i < fuzz_data.len; i++)
+		((unsigned char *)data_pointer)[i] = ((char *)fuzz_data.data)[i];
+
+    /* restore rewritten data values after fuzz data */
+    for(i = fuzz_data.len; i < previous_fuzz_data_len; i++)
+        ((unsigned char *)data_pointer)[i] = original_fuzzed_data[i];
+
+    previous_fuzz_data_len = fuzz_data.len;
 }
 
 void restore_memory(void)
@@ -116,12 +131,12 @@ inline ADDRINT valid_addr(ADDRINT addr)
     return false;
 }
 
-// afl/wrap ожидает конец обработки в target
+
 VOID fuzzer_synchronization(char *cmd)
 {
     write_to_pipe(cmd);
 }
-// target/instrumentation ожидает новых данных от afl/wrap через pipe
+
 VOID get_fuzz_data()
 {
     while(1)
@@ -144,9 +159,6 @@ VOID get_fuzz_data()
 
 void exec_instr(ADDRINT addr, CONTEXT * ctx)
 {
-	//if( addr >= 0x401000 && addr <= 0x401024 )
-	//printf(HEX_FMT "\n", addr - min_addr);
-
     if(was_crash)
     {
         was_crash = false;
@@ -199,21 +211,6 @@ VOID track_branch(ADDRINT cur_addr)
         }
     }
     last_id = cur_id;
-
-    /*
-    if(entry_addr && entry_addr == cur_id)
-    {
-        if(Knob_debug)
-            std::cout << "entry" << std::endl;
-        coverage_enable = TRUE;
-    }
-    else if(exit_addr && exit_addr == cur_id)
-    {
-        if(Knob_debug)
-            std::cout << "exit" << std::endl;
-        coverage_enable = FALSE;
-    }
-    */
 }
 
 
@@ -246,10 +243,6 @@ VOID trace_intrument(TRACE trace, VOID *v)
                     // As per afl-as.c we only care about conditional branches (so no JMP instructions)
                     if (INS_HasFallThrough(ins) || INS_IsCall(ins))
                     {
-                        /*if (Knob_debug) {
-                            std::cout << "BRACH: 0x" << std::hex << INS_Address(ins) << ":\t" << INS_Disassemble(ins) << std::endl;
-                        }*/
-
                         // Instrument the code.
                         INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)track_branch,
                             IARG_INST_PTR,
@@ -270,8 +263,6 @@ void reopen_pipe(int signal)
 }
 bool write_to_pipe(char *cmd)
 {
-    //if( access("afl_sync", F_OK ) == -1 )
-    //    mkfifo("afl_sync", 777);  сделать RETURN
     if(afl_sync_fd == -1)
         afl_sync_fd = open("afl_sync", O_WRONLY);
     write(afl_sync_fd, cmd, 1); /* SIGPIPE */
@@ -279,42 +270,42 @@ bool write_to_pipe(char *cmd)
 }
 bool read_from_pipe()
 {
-    unsigned int num;
     if(afl_data_fd == -1)
        afl_data_fd = open("afl_data", O_RDONLY);
-    fuzz_data.len = 0;
-    while( ( num = read(afl_data_fd, fuzz_data.data, FUZZ_DATA_SIZE)) > 0 ) /* WAIT */
-   	{
-        fuzz_data.len += num;
-    }
+
+    fuzz_data.len = read(afl_data_fd, fuzz_data.data, FUZZ_DATA_SIZE);
     if( (int)fuzz_data.len == 0 )
         return false;
     if(Knob_debug)
     {
-        write(1, "[+] fuzz data: ", sizeof("[+] fuzz data: "));
-        write(1, fuzz_data.data, fuzz_data.len);
+        //write(1, "[+] fuzz data: ", sizeof("[+] fuzz data: "));
+        //write(1, fuzz_data.data, fuzz_data.len);
+        printf("[+] fuzz data %d bytes\n", fuzz_data.len);
     }
     return true;
 }
 
 bool setup_shm() {
-    if (char *shm_key_str = getenv("__AFL_SHM_ID")) {
+    if (char *shm_key_str = getenv("__AFL_SHM_ID"))
+    {
         int shm_id, shm_key;
         shm_key = atoi(shm_key_str);
         if(Knob_debug)
-            std::cout << "[*] shm_key: " << shm_key << std::endl;        
+            printf("[*] shm_key: %d\n", shm_key);
 	
         if( ( shm_id = shmget( (key_t)shm_key, MAP_SIZE, IPC_CREAT | IPC_EXCL | 0600 ) ) < 0 )  // try create by key
             shm_id = shmget( (key_t)shm_key, MAP_SIZE, IPC_EXCL | 0600 );  // find by key
-        bitmap_shm = reinterpret_cast<uint8_t*>(shmat(shm_id, 0, 0));
+        bitmap_shm = (uint8_t*)(shmat(shm_id, 0, 0));
         
-        if (bitmap_shm == reinterpret_cast<void *>(-1)) {
-            std::cout << "failed to get shm addr from shmmat()" << std::endl;
+        if (bitmap_shm == (void *)(-1))
+        {
+            printf("[!] failed to get shm addr from shmmat()\n");
             return false;
         }
     }
-    else {
-        std::cout << "failed to get shm_id envvar" << std::endl;
+    else
+    {
+        printf("[!] failed to get shm_id envvar\n");
         return false;
     }
     return true;
@@ -364,12 +355,6 @@ EXCEPT_HANDLING_RESULT internal_exception(THREADID tid, EXCEPTION_INFO *pExceptI
 
 VOID entry_point(VOID *ptr)
 {
-    /*  Much like the original instrumentation from AFL we only want to instrument the segments of code
-     *  from the actual application and not the link and PIN setup itself.
-     *
-     *  Inspired by: http://joxeankoret.com/blog/2012/11/04/a-simple-pin-tool-unpacker-for-the-linux-version-of-skype/
-     */
-
     IMG img;
     SEC sec;
     for(img = APP_ImgHead(); IMG_Valid(img); img = IMG_Next(img))
@@ -377,7 +362,7 @@ VOID entry_point(VOID *ptr)
         if( need_module != "" && strcasestr( IMG_Name(img).c_str(), need_module.c_str() ) == 0 )
             continue;
         if(Knob_debug)
-            printf("[*] module %s %lx " HEX_FMT "\n", IMG_Name(img).c_str(), IMG_LowAddress(img), IMG_HighAddress(img));
+            printf("[*] module %s " HEX_FMT " " HEX_FMT "\n", IMG_Name(img).c_str(), IMG_LowAddress(img), IMG_HighAddress(img));
         for(sec= IMG_SecHead(img); SEC_Valid(sec); sec = SEC_Next(sec))
         {
             if ( SEC_IsExecutable(sec) /*&& SEC_Name(sec) == ".text"*/)
@@ -421,14 +406,15 @@ void fini(INT32 code, VOID *v)
 {
     if (Knob_debug)
 	   printf("[*] end\n");
-	fflush(f);
-	fclose(f);
+	//fflush(f);
+	//fclose(f);
 }
 
 INT32 Usage()
 {
     std::cerr << "in-memory fuzzer -- A pin tool to enable blackbox binaries to be fuzzed with AFL on Linux/Windows" << std::endl;
     std::cerr << "   -debug --  prints extra debug information" << std::endl;
+    std::cerr << "   -module module --  module for coverage" << std::endl;
     std::cerr << "   -entry 0xADDR --  start address for coverage" << std::endl;
     std::cerr << "   -exit 0xADDR --  stop address for coverage" << std::endl;
     return -1;
@@ -436,7 +422,7 @@ INT32 Usage()
 
 int main(int argc, char ** argv)
 {
-	f = fopen("fuzz.log", "w");
+	//f = fopen("fuzz.log", "w");
 	if(PIN_Init(argc, argv))
         return Usage();
 
@@ -462,4 +448,5 @@ int main(int argc, char ** argv)
 /*
     linux named pipe performance: > 1M/s
     pure PIN in-memory speed: 50k/s
+    this module speed: ~30k/s
 */
