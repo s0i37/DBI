@@ -3,7 +3,7 @@
 #include <list>
 #include <iostream>
 
-#define VERSION "0.17"
+#define VERSION "0.20"
 #define FUZZ_DATA_SIZE 0x1000
 #define MAP_SIZE    (1 << 16)
 
@@ -25,9 +25,12 @@
 
 namespace windows {
     #include <Windows.h>
-    HANDLE pipe_sync = INVALID_HANDLE_VALUE, pipe_data;
+    HANDLE pipe_sync, pipe_data;
+    OVERLAPPED pipe_overlapped;
+    BOOL has_pipe_sync_connected = FALSE;
+    BOOL has_pipe_data_connected = FALSE;
     char read_from_pipe();
-    void write_to_pipe(char);
+    void write_to_pipe(char *);
     void get_fuzz_data();
 }
 
@@ -41,6 +44,8 @@ ADDRINT max_addr = 0;
 ADDRINT entry_addr = 0;
 ADDRINT exit_addr = 0;
 string need_module;
+unsigned char original_fuzzed_data[FUZZ_DATA_SIZE];
+unsigned int previous_fuzz_data_len = 0;
 
 unsigned char bitmap[MAP_SIZE];
 uint8_t *bitmap_shm = 0;
@@ -80,12 +85,40 @@ void randomizeREG(CONTEXT * ctx, ADDRINT nextAddr)
 
 void FUZZ(CONTEXT *ctx)
 {
+    unsigned int i;
     if(Knob_debug)
       printf("[*] waiting of fuzz data\n");
 	windows::get_fuzz_data(); /* WAIT */
-	ADDRINT eax = PIN_GetContextReg(ctx, REG_GCX);
-	for(unsigned int i = 0; i < fuzz_data.len; i++)
-		((unsigned char *)eax)[i] = ((char *)fuzz_data.data)[i];
+	ADDRINT data_pointer = PIN_GetContextReg(ctx, REG_GCX);
+
+    /* save virgin data values */
+    //printf("saving: ");
+    for(i = previous_fuzz_data_len; i < fuzz_data.len; i++)
+    {
+        original_fuzzed_data[i] = ((unsigned char *)data_pointer)[i];
+        //printf("%x", original_fuzzed_data[i]);
+    }
+    //printf("\n");
+
+    /* insert fuzz data values */
+    //printf("fuzz: ");
+	for(i = 0; i < fuzz_data.len; i++)
+    {
+		((unsigned char *)data_pointer)[i] = ((char *)fuzz_data.data)[i];
+        //printf("%x", ((unsigned char *)data_pointer)[i]);
+    }
+    //printf("\n");
+
+    /* restore rewritten data values after fuzz data */
+    //printf("restore: ");
+    for(i = fuzz_data.len; i < previous_fuzz_data_len; i++)
+    {
+        ((unsigned char *)data_pointer)[i] = original_fuzzed_data[i];
+        //printf("%x", ((unsigned char *)data_pointer)[i]);
+    }
+    //printf("\n");
+
+    previous_fuzz_data_len = fuzz_data.len;
 }
 
 void restore_memory(void)
@@ -140,11 +173,6 @@ void exec_instr(ADDRINT addr, CONTEXT * ctx)
 
 	if(addr - min_addr == entry_addr && in_fuzz_area == FALSE)
 	{
-        windows::write_to_pipe('P');
-        command = windows::read_from_pipe();
-        if(command == 'Q')
-            PIN_ExitApplication(0);
-
 		in_fuzz_area = TRUE;
 		PIN_SaveContext(ctx, &snapshot);
 		is_saved_snapshot = TRUE;
@@ -158,7 +186,7 @@ void exec_instr(ADDRINT addr, CONTEXT * ctx)
 		in_fuzz_area = FALSE;
         if (Knob_debug)
           printf("[*] fuzz iteration " INT_FMT " finished\n", fuzz_iters);
-        windows::write_to_pipe('K');
+        windows::write_to_pipe("K");
 		if(is_saved_snapshot)
 			PIN_SaveContext(&snapshot, ctx);
 		is_saved_snapshot = FALSE;
@@ -250,52 +278,62 @@ VOID trace_intrument(TRACE trace, VOID *v)
 
 
 namespace windows {
-    void write_to_pipe(char cmd)
+    void write_to_pipe(char *cmd)
     {
         DWORD num_written;
-
-        if(pipe_sync == INVALID_HANDLE_VALUE)
-            /* open existed pipe */
-            pipe_sync = CreateFile(
-                "\\\\.\\pipe\\afl_pipe_default",// pipe name
-                GENERIC_READ|GENERIC_WRITE,     // read and write access
-                0,                              // no sharing
-                NULL,                           // default security attributes
-                OPEN_EXISTING,                  // opens existing pipe
-                0,                              // default attributes
-                NULL);
-
-        ConnectNamedPipe(pipe_sync, NULL); /* WAIT */
-        WriteFile(pipe_sync, &cmd, 1, &num_written, NULL);
-        DisconnectNamedPipe(pipe_sync);
-
+        //Sleep(1000);
+        if(!has_pipe_sync_connected)
+        {
+            ConnectNamedPipe(pipe_sync, NULL); /* WAIT */
+            has_pipe_sync_connected = TRUE;
+        }
+        WriteFile(pipe_sync, cmd, 1, &num_written, NULL);
     }
     char read_from_pipe()
     {
         DWORD num_read;
         char result;
 
-        ConnectNamedPipe(pipe_sync, NULL); /* WAIT */
         ReadFile(pipe_sync, &result, 1, &num_read, NULL);
-        DisconnectNamedPipe(pipe_sync);
         return result;
     }
 
-    // target/instrumentation WAIT новых данных от afl/wrap через pipe
     void get_fuzz_data()
     {
-        ConnectNamedPipe(pipe_data, NULL); /* WAIT */
-        ReadFile(pipe_data, fuzz_data.data, FUZZ_DATA_SIZE, (LPDWORD)&fuzz_data.len, NULL);
-        DisconnectNamedPipe(pipe_data);
+        if(!has_pipe_data_connected)
+        {
+            ConnectNamedPipe(pipe_data, NULL); /* WAIT */
+            has_pipe_data_connected = TRUE;
+        }
+        if( ReadFile(pipe_data, fuzz_data.data, FUZZ_DATA_SIZE, (LPDWORD)&fuzz_data.len, &pipe_overlapped) || GetLastError() == ERROR_IO_PENDING )
+            WaitForSingleObject(pipe_overlapped.hEvent, INFINITE);
+
+        if(Knob_debug)
+        {
+            printf("[*] fuzz data %d bytes\n", fuzz_data.len);
+            printf("[*] fuzz data: %s\n", fuzz_data.data);
+        }
     }
 
     void setup_pipe()
     {
         /* create new pipe */
         pipe_sync = CreateNamedPipe(
-            "\\\\.\\pipe\\afl_pipe_default",// pipe name
-            PIPE_ACCESS_DUPLEX |            // read/write access 
-            FILE_FLAG_OVERLAPPED,           // overlapped mode 
+            "\\\\.\\pipe\\afl_sync",   // pipe name
+            PIPE_ACCESS_DUPLEX ,              // read/write access
+  //          FILE_FLAG_OVERLAPPED,             // overlapped mode
+            0,
+            1,                        // max. instances
+            512,                      // output buffer size
+            512,                      // input buffer size
+            20000,                    // client time-out
+            NULL);                    // default security attribute
+
+        /* create new pipe */
+        pipe_data = CreateNamedPipe(
+            "\\\\.\\pipe\\afl_data",        // pipe name
+            PIPE_ACCESS_DUPLEX |            // read/write access
+            FILE_FLAG_OVERLAPPED,           // overlapped mode
             0,
             1,                              // max. instances
             512,                            // output buffer size
@@ -303,23 +341,21 @@ namespace windows {
             20000,                          // client time-out
             NULL);
 
-        /* create new pipe */
-        pipe_data = CreateNamedPipe(
-            "\\\\.\\pipe\\afl_data",        // pipe name
-            PIPE_ACCESS_DUPLEX |            // read/write access 
-            FILE_FLAG_OVERLAPPED,           // overlapped mode 
-            0,
-            1,                              // max. instances
-            512,                            // output buffer size
-            512,                            // input buffer size
-            20000,                          // client time-out
-            NULL);
+        memset(&pipe_overlapped, 0, sizeof(pipe_overlapped));
+
+        pipe_overlapped.hEvent = CreateEvent(
+            NULL,    // default security attribute 
+            TRUE,    // manual-reset event 
+            TRUE,    // initial state = signaled 
+            NULL);   // unnamed event object 
+
     }
 
     void setup_shm()
     {
         HANDLE map_file;
-                   // (char *)"Local\\winapi-shm-1337");
+                   
+        /* create new shared memory */
         map_file = CreateFileMapping(
                    INVALID_HANDLE_VALUE,    // use paging file
                    NULL,                    // default security
@@ -371,7 +407,7 @@ void context_change(THREADID tid, CONTEXT_CHANGE_REASON reason, const CONTEXT *c
         }
         if(info == 0xc0000005)
         {
-            windows::write_to_pipe('C');
+            windows::write_to_pipe("C");
             was_crash = true;
         }
     }
@@ -443,6 +479,10 @@ void fini(INT32 code, VOID *v)
 {
     if (Knob_debug)
 	   printf("[*] end\n");
+    windows::DisconnectNamedPipe(windows::pipe_sync);
+    windows::DisconnectNamedPipe(windows::pipe_data);
+    windows::CloseHandle(windows::pipe_sync);
+    windows::CloseHandle(windows::pipe_data);
 	//fflush(f);
 	//fclose(f);
 }
@@ -451,6 +491,7 @@ INT32 Usage()
 {
     std::cerr << "in-memory fuzzer -- A pin tool to enable blackbox binaries to be fuzzed with AFL on Linux/Windows" << std::endl;
     std::cerr << "   -debug --  prints extra debug information" << std::endl;
+    std::cerr << "   -module module.exe --  module for coverage" << std::endl;
     std::cerr << "   -entry 0xADDR --  start address for coverage" << std::endl;
     std::cerr << "   -exit 0xADDR --  stop address for coverage" << std::endl;
     return -1;
@@ -482,6 +523,5 @@ int main(int argc, char ** argv)
 }
 
 /*
-    windows pipe performance: ~25k/s
-    pure PIN in-memory speed: 15k/s
+    this module speed: ~20k/s
 */
