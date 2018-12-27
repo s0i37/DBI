@@ -211,4 +211,7 @@ int main(int argc, char ** argv)
 TODO:
 нужна обратная связь через pipe (tracectl) для отметки временных моментов (напр. перед подачей данных и после)
 fprintf(f, "[*] event %s\n", event_name);
+
+!problem:
+	строки наезжают друг на друга
 */
