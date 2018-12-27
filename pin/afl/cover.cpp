@@ -334,3 +334,7 @@ int main(int argc, char *argv[])
 }
 
 // https://github.com/carlosgprado/BrundleFuzz/blob/master/client_windows/MyPinTool.cpp
+/*
+TODO:
+ разделить afl/cover.cpp и winafl/cover.cpp
+*/
