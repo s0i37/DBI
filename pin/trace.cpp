@@ -4,7 +4,7 @@
 #include <iostream>
 #include <list>
 
-#define VERSION "0.35"
+#define VERSION "0.36"
 
 #if defined(__i386__) || defined(_WIN32)
 	#define HEX_FMT "0x%08x"
@@ -20,16 +20,22 @@ ADDRINT high_boundary;
 string need_module;
 long long int takt = 0;
 list <string> functions;
+unsigned int instructions = 0;
+unsigned int max_instructions = 0;
 
 KNOB<BOOL> Knob_debug(KNOB_MODE_WRITEONCE,  "pintool", "debug", "0", "Enable debug mode");
 KNOB<string> Knob_outfile(KNOB_MODE_WRITEONCE,  "pintool", "outfile", "trace.txt", "Output file");
 KNOB<ADDRINT> Knob_from(KNOB_MODE_WRITEONCE, "pintool", "from", "0", "start address (absolute) for tracing");
 KNOB<ADDRINT> Knob_to(KNOB_MODE_WRITEONCE, "pintool", "to", "0", "stop address (absolute) for tracing");
+KNOB<ADDRINT> Knob_max_inst(KNOB_MODE_WRITEONCE, "pintool", "max_inst", "0", "maximum count of instructions for tracing");
 KNOB<string> Knob_module(KNOB_MODE_WRITEONCE,  "pintool", "module", "", "tracing just this module");
 
 VOID dotrace_exec(CONTEXT *ctx, UINT32 threadid, ADDRINT eip, USIZE opcode_size)
 {
 	unsigned int i;
+	instructions += 1;
+	if(instructions == max_instructions)
+		PIN_Detach();
 	ADDRINT eax = PIN_GetContextReg(ctx, REG_GAX);
 	ADDRINT ecx = PIN_GetContextReg(ctx, REG_GCX);
 	ADDRINT edx = PIN_GetContextReg(ctx, REG_GDX);
@@ -192,6 +198,7 @@ int main(int argc, char ** argv)
 	low_boundary = Knob_from.Value();
     high_boundary = Knob_to.Value();
     need_module = Knob_module.Value();
+    max_instructions = Knob_max_inst.Value();
 	outfile_name = Knob_outfile.Value().c_str();
 	f = fopen(outfile_name, "w");
 	fprintf(f, "[#] TAKT:EIP:THREAD_ID {OPCODE} EAX,ECX,EDX,EBX,ESP,EBP,ESI,EDI\n");
@@ -214,4 +221,6 @@ fprintf(f, "[*] event %s\n", event_name);
 
 !problem:
 	строки наезжают друг на друга
+!problem:
+	[0x09375c6c] <- 0x00000000 - старое значение INS_IsMemoryWrite нужно обрабатывать в IPOINT_AFTER
 */
