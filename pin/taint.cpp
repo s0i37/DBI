@@ -3,16 +3,36 @@
 #include <list>
 #include <map>
 
-#define VERSION "0.34"
+#define VERSION "0.35"
+#define MAX_TAINT_DATA 0x1000
+
+#if defined(__i386__) || defined(_WIN32)
+	#define HEX_FMT "0x%08x"
+	#define INT_FMT "%u"
+	#define X32 1
+#elif defined(__x86_64__) || defined(_WIN64)
+	#define HEX_FMT "0x%08lx"
+	#define INT_FMT "%lu"
+	#define X64 1
+#endif
+
+typedef struct {
+	const char *module;
+	ADDRINT low;
+	ADDRINT high;
+} MODULE;
 
 list <ADDRINT> pages;
+list <MODULE> modules;
 list <ADDRINT> tainted_addrs;
-map <int, list <REG>> tainted_regs;
+map < int, list <REG> > tainted_regs;
 
 const char *need_module;
 ADDRINT low_boundary;
 ADDRINT high_boundary;
-FILE *f;
+FILE *f, *taint_data_file;
+unsigned char *taint_data;
+UINT32 taint_data_len;
 unsigned long int ins_count = 0;
 
 KNOB<BOOL> Knob_debug(KNOB_MODE_WRITEONCE,  "pintool", "debug", "0", "Enable debug mode");
@@ -20,6 +40,8 @@ KNOB<string> Knob_outfile(KNOB_MODE_WRITEONCE,  "pintool", "outfile", "taint.txt
 KNOB<ADDRINT> Knob_from(KNOB_MODE_WRITEONCE, "pintool", "from", "0", "start address (absolute) for taint");
 KNOB<ADDRINT> Knob_to(KNOB_MODE_WRITEONCE, "pintool", "to", "0", "stop address (absolute) for taint");
 KNOB<string> Knob_module(KNOB_MODE_WRITEONCE,  "pintool", "module", "", "taint this module");
+KNOB<string> Knob_taint(KNOB_MODE_WRITEONCE,  "pintool", "taint", "", "taint this data");
+
 
 void add_mem_taint(ADDRINT addr)
 {
@@ -32,10 +54,12 @@ void del_mem_taint(ADDRINT addr)
 void save_page(ADDRINT addr)
 {
 	list <ADDRINT>::iterator it;
+	addr = addr >> 12;
+	addr = addr << 12;
 	for( it = pages.begin(); it != pages.end(); it++ )
-		if( (addr & 0xfffff000) == *it )
+		if( addr == *it )
 			return;
-	pages.push_back( addr & 0xfffff000 );
+	pages.push_back(addr);
 }
 
 
@@ -54,37 +78,44 @@ REG get_full_reg(REG reg)
 {
 	switch(reg)
 	{
-		case REG_EAX:
+		case REG_GAX:
 		case REG_AX:
 		case REG_AH:
 		case REG_AL:
-			return REG_EAX;
+			return REG_GAX;
 
-		case REG_ECX:
+		case REG_GCX:
 		case REG_CX:
 		case REG_CH:
 		case REG_CL:
-			return REG_ECX;
+			return REG_GCX;
 
-		case REG_EDX:
+		case REG_GDX:
 		case REG_DX:
 		case REG_DH:
 		case REG_DL:
-			return REG_EDX;
+			return REG_GDX;
 
-		case REG_EBX:
+		case REG_GBX:
 		case REG_BX:
 		case REG_BH:
 		case REG_BL:
-			return REG_EBX;
+			return REG_GBX;
 
-		case REG_EDI:
+		case REG_STACK_PTR:
+			return REG_STACK_PTR;
+
+		case REG_GBP:
+		case REG_BP:
+			return REG_GBP;
+
+		case REG_GDI:
 		case REG_DI:
-			return REG_EDI;
+			return REG_GDI;
 
-		case REG_ESI:
+		case REG_GSI:
 		case REG_SI:
-			return REG_ESI;
+			return REG_GSI;
 
 		default:
 			return (REG) 0;
@@ -95,7 +126,7 @@ string get_reg_name(REG reg)
 {
 	switch(reg)
 	{
-		case REG_EAX:
+		case REG_GAX:
 			return "EAX";
 		case REG_AX:
 			return "AX";
@@ -104,7 +135,7 @@ string get_reg_name(REG reg)
 		case REG_AL:
 			return "AL";
 
-		case REG_ECX:
+		case REG_GCX:
 			return "ECX";
 		case REG_CX:
 			return "CX";
@@ -113,7 +144,7 @@ string get_reg_name(REG reg)
 		case REG_CL:
 			return "CL";
 
-		case REG_EDX:
+		case REG_GDX:
 			return "EDX";
 		case REG_DX:
 			return "DX";
@@ -122,7 +153,7 @@ string get_reg_name(REG reg)
 		case REG_DL:
 			return "DL";
 
-		case REG_EBX:
+		case REG_GBX:
 			return "EBX";
 		case REG_BX:
 			return "BX";
@@ -131,12 +162,17 @@ string get_reg_name(REG reg)
 		case REG_BL:
 			return "BL";
 
-		case REG_EDI:
+		case REG_GBP:
+			return "EBP";
+		case REG_BP:
+			return "BP";
+
+		case REG_GDI:
 			return "EDI";
 		case REG_DI:
 			return "DI";
 
-		case REG_ESI:
+		case REG_GSI:
 			return "ESI";
 		case REG_SI:
 			return "SI";
@@ -167,35 +203,39 @@ bool add_reg_taint(REG reg, UINT32 threadid)
 
 	switch(reg)
 	{
-		case REG_EAX:	tainted_regs[threadid].push_front(REG_EAX);
+		case REG_GAX:	tainted_regs[threadid].push_front(REG_GAX);
 		case REG_AX:	tainted_regs[threadid].push_front(REG_AX);
 		case REG_AH:	tainted_regs[threadid].push_front(REG_AH);
 		case REG_AL:	tainted_regs[threadid].push_front(REG_AL);
 						break;
 
-		case REG_EDX:	tainted_regs[threadid].push_front(REG_EDX);
+		case REG_GDX:	tainted_regs[threadid].push_front(REG_GDX);
 		case REG_DX:	tainted_regs[threadid].push_front(REG_DX);
 		case REG_DH:	tainted_regs[threadid].push_front(REG_DH);
 		case REG_DL:	tainted_regs[threadid].push_front(REG_DL);
 						break;
 
-		case REG_ECX:	tainted_regs[threadid].push_front(REG_ECX);
+		case REG_GCX:	tainted_regs[threadid].push_front(REG_GCX);
 		case REG_CX:	tainted_regs[threadid].push_front(REG_CX);
 		case REG_CH:	tainted_regs[threadid].push_front(REG_CH);
 		case REG_CL:	tainted_regs[threadid].push_front(REG_CL);
 						break;
 
-		case REG_EBX:	tainted_regs[threadid].push_front(REG_EBX);
+		case REG_GBX:	tainted_regs[threadid].push_front(REG_GBX);
 		case REG_BX:	tainted_regs[threadid].push_front(REG_BX);
 		case REG_BH:	tainted_regs[threadid].push_front(REG_BH);
 		case REG_BL:	tainted_regs[threadid].push_front(REG_BL);
 						break;
 
-		case REG_EDI:	tainted_regs[threadid].push_front(REG_EDI);
+		case REG_GBP: 	tainted_regs[threadid].push_front(REG_GBP);
+		case REG_BP: 	tainted_regs[threadid].push_front(REG_BP);
+						break;
+
+		case REG_GDI:	tainted_regs[threadid].push_front(REG_GDI);
 		case REG_DI:	tainted_regs[threadid].push_front(REG_DI);
 						break;
 
-		case REG_ESI:	tainted_regs[threadid].push_front(REG_ESI);
+		case REG_GSI:	tainted_regs[threadid].push_front(REG_GSI);
 		case REG_SI:	tainted_regs[threadid].push_front(REG_SI);
 						break;
 
@@ -225,35 +265,39 @@ bool del_reg_taint(REG reg, UINT32 threadid)
 	*/
 	switch(reg)
 	{
-		case REG_EAX:	tainted_regs[threadid].remove(REG_EAX);
+		case REG_GAX:	tainted_regs[threadid].remove(REG_GAX);
 		case REG_AX:	tainted_regs[threadid].remove(REG_AX);
 		case REG_AH:	tainted_regs[threadid].remove(REG_AH);
 		case REG_AL:	tainted_regs[threadid].remove(REG_AL);
 						break;
 
-		case REG_EDX:	tainted_regs[threadid].remove(REG_EDX);
+		case REG_GDX:	tainted_regs[threadid].remove(REG_GDX);
 		case REG_DX:	tainted_regs[threadid].remove(REG_DX);
 		case REG_DH:	tainted_regs[threadid].remove(REG_DH);
 		case REG_DL:	tainted_regs[threadid].remove(REG_DL);
 						break;
 
-		case REG_ECX:	tainted_regs[threadid].remove(REG_ECX);
+		case REG_GCX:	tainted_regs[threadid].remove(REG_GCX);
 		case REG_CX:	tainted_regs[threadid].remove(REG_CX);
 		case REG_CH:	tainted_regs[threadid].remove(REG_CH);
 		case REG_CL:	tainted_regs[threadid].remove(REG_CL);
 						break;
 
-		case REG_EBX:	tainted_regs[threadid].remove(REG_EBX);
+		case REG_GBX:	tainted_regs[threadid].remove(REG_GBX);
 		case REG_BX:	tainted_regs[threadid].remove(REG_BX);
 		case REG_BH:	tainted_regs[threadid].remove(REG_BH);
 		case REG_BL:	tainted_regs[threadid].remove(REG_BL);
 						break;
 
-		case REG_EDI:	tainted_regs[threadid].remove(REG_EDI);
+		case REG_GBP:	tainted_regs[threadid].remove(REG_GBP);
+		case REG_BP: 	tainted_regs[threadid].remove(REG_BP);
+						break;
+
+		case REG_GDI:	tainted_regs[threadid].remove(REG_GDI);
 		case REG_DI:	tainted_regs[threadid].remove(REG_DI);
 						break;
 
-		case REG_ESI:	tainted_regs[threadid].remove(REG_ESI);
+		case REG_GSI:	tainted_regs[threadid].remove(REG_GSI);
 		case REG_SI:	tainted_regs[threadid].remove(REG_SI);
 						break;
 
@@ -287,7 +331,7 @@ void telescope(ADDRINT addr, UINT32 deep)
 	for( it = pages.begin(); it != pages.end(); it++ )
 		if( (addr & 0xfffff000) == *it )
 		{
-			fprintf(f, " -> %08lX", *((ADDRINT *)addr) );
+			fprintf(f, " -> " HEX_FMT, *((ADDRINT *)addr) );
 			telescope( *((ADDRINT *)addr), deep+1 );
 			return;
 		}
@@ -295,40 +339,61 @@ void telescope(ADDRINT addr, UINT32 deep)
 
 }
 
-
-/* catching initial data */
-unsigned int buff_len;
-ADDRINT buff;
-/* WSARecv */
-void wsarecv_before(ADDRINT eip, ADDRINT lpBuffers)
+const char *get_module_name(ADDRINT addr)
 {
-	if( lpBuffers == 0 )
+	list <MODULE>::iterator module_it;
+	for( module_it = modules.begin(); module_it != modules.end(); module_it++ )
+		if( module_it->low <= addr && module_it->high >= addr )
+			return module_it->module;
+	return "";
+}
+
+ADDRINT get_module_base(ADDRINT addr)
+{
+	list <MODULE>::iterator module_it;
+	for( module_it = modules.begin(); module_it != modules.end(); module_it++ )
+		if( module_it->low <= addr && module_it->high >= addr )
+			return module_it->low;
+	return 0;
+}
+
+void find_tainted_data(ADDRINT mem)
+{
+	unsigned int i = 0;
+	BOOL is_match = false;
+	list <ADDRINT>::iterator addr_it;
+
+	for(i = 0; i < taint_data_len; i++)
+		if( taint_data[i] == *(unsigned char *)mem )
+		{
+			is_match = true;
+			mem -= i;
+			break;
+		}
+
+	if(!is_match)
 		return;
-	buff_len = ((int *)lpBuffers)[0];
-	buff = ((int *)lpBuffers)[1];
-}
-void wsarecv_after(ADDRINT eip)
-{
-	unsigned int i;
-	for( i = 0; i < buff_len; i++ )
-		add_mem_taint( buff + i );
-}
 
-/* recv */
-void recv_before(ADDRINT eip, ADDRINT lpBuffer, UINT32 buff_size)
-{
-	buff_len = buff_size;
-	buff = lpBuffer;
-	fprintf(f, "[*] recv(%d) -> 0x%08lx\n", buff_len, buff );
-	fflush(f);
-}
-void recv_after(ADDRINT eip)
-{
-	unsigned int i;
-	fprintf(f, "[*] *0x%08lx: 0x%08lx\n", buff, *((long unsigned int*)buff) );
-	fflush(f);
-	for( i = 0; i < buff_len; i++ )
-		add_mem_taint( buff + i );
+	for(i = 0; i < taint_data_len; i++)
+		if( taint_data[i] != ((unsigned char *)mem)[i] )
+		{
+			is_match = false;
+			break;
+		}
+
+	if(!is_match)
+		return;
+	
+	for( addr_it = tainted_addrs.begin(); addr_it != tainted_addrs.end(); addr_it++ )
+		if( mem == *addr_it )
+			return;
+
+	for(i = 0; i < taint_data_len; i++)
+	{
+		fprintf(f, "[+] founded tainted data " HEX_FMT "\n", mem + i);
+		add_mem_taint(mem + i);
+	}
+
 }
 
 
@@ -339,6 +404,9 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, int rregs_count, REG * r
 	ADDRINT taint_memory_read = 0, taint_memory_write = 0, taint_memory_ptr = 0;
 	ADDRINT register_value = 0;
 	REG reg = (REG) 0;
+
+	if(memop0_type == 1) find_tainted_data(memop0);
+	if(memop1_type == 1) find_tainted_data(memop1);
 
 	for( i = 0; i < rregs_count; i++ ) /* каждый из читаемых регистров */
 	{
@@ -356,6 +424,8 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, int rregs_count, REG * r
 			continue;
 		if( ( register_value = PIN_GetContextReg( ctx, reg ) ) == 0 ) // если регистр может быть указателем
 			continue;
+		
+		/* проверка этого идёт ниже 
 		for( addr_it = tainted_addrs.begin(); addr_it != tainted_addrs.end(); addr_it++ )
 			if( register_value == *addr_it ) // если он указывает на помеченную память 
 			{
@@ -364,6 +434,8 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, int rregs_count, REG * r
 			}
 		if(taint_memory_ptr)
 			break;
+		*/
+
 	}
 
 
@@ -427,23 +499,24 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, int rregs_count, REG * r
 		save_page(memop1);
 
 	if(is_spread || taint_memory_ptr)
-		if( (eip >= low_boundary && eip < high_boundary) || (low_boundary == 0 && high_boundary == 0) )
+		//if( (eip >= low_boundary && eip < high_boundary) || (low_boundary == 0 && high_boundary == 0) )
+		if(1)
 		{
-			fprintf(f, "0x%08lx:%u:%lu:", eip, threadid, ins_count);
+			fprintf(f, "%s" HEX_FMT ":%u:%lu:", get_module_name(eip), eip - get_module_base(eip), threadid, ins_count);
 			if(taint_memory_read)
 			{
-				fprintf( f, " *%08lx -> %08lX", taint_memory_read, *((unsigned long int *)taint_memory_read) );
+				fprintf( f, " *" HEX_FMT " -> %08lX", taint_memory_read, *((unsigned long int *)taint_memory_read) );
 				telescope( *((int *)taint_memory_read), 1 );
 			}
 			if(taint_memory_write)
-				fprintf( f, " *%08lx <- ;", taint_memory_write );
+				fprintf( f, " *" HEX_FMT " <- ;", taint_memory_write );
 			if(taint_memory_ptr)
 			{
-				fprintf( f, " %s:*%08lx = %08lX", get_reg_name(reg).c_str(), taint_memory_ptr, *((unsigned long int *)taint_memory_ptr) );
+				fprintf( f, " %s:*" HEX_FMT " = %08lX", get_reg_name(reg).c_str(), taint_memory_ptr, *((unsigned long int *)taint_memory_ptr) );
 				telescope( *((int *)taint_memory_ptr), 1 );
 			}
 			else if(reg && register_value)
-				fprintf( f, " %s=%08lX;", get_reg_name(reg).c_str(), register_value );
+				fprintf( f, " %s=" HEX_FMT ";", get_reg_name(reg).c_str(), register_value );
 			fprintf(f, "\n");
 			fflush(f);
 		}
@@ -467,7 +540,7 @@ void ins_instrument(INS ins, VOID * v)
 
 	if( rregs_count == -1 || wregs_count == -1 || mems_count == -1 )
 	{
-		fprintf(f, "[!] error 0x%08lx\n", eip);
+		fprintf(f, "[!] error " HEX_FMT "\n", eip);
 		fflush(f);
 		return;
 	}
@@ -532,35 +605,24 @@ void ins_instrument(INS ins, VOID * v)
 
 void img_instrument(IMG img, VOID * v)
 {
+	modules.push_back( (MODULE){ .module = IMG_Name(img).c_str(), .low = IMG_LowAddress(img), .high = IMG_HighAddress(img) } );
 	if(need_module && strcasestr( IMG_Name(img).c_str(), need_module ) )
 	{
-		fprintf( f, "[+] module instrumented: 0x%08lx 0x%08lx %s\n", IMG_LowAddress(img), IMG_HighAddress(img), IMG_Name(img).c_str() );
+		fprintf( f, "[+] module instrumented: " HEX_FMT " " HEX_FMT " %s\n", IMG_LowAddress(img), IMG_HighAddress(img), IMG_Name(img).c_str() );
 		low_boundary = IMG_LowAddress(img);
 		high_boundary = IMG_HighAddress(img);
 	}
 	else
-		fprintf( f, "[*] module 0x%08lx 0x%08lx %s\n", IMG_LowAddress(img), IMG_HighAddress(img), IMG_Name(img).c_str() );
+		fprintf( f, "[*] module " HEX_FMT " " HEX_FMT " %s\n", IMG_LowAddress(img), IMG_HighAddress(img), IMG_Name(img).c_str() );
 	fflush(f);
-
-
-	/* catch initial data for taint execution */
-	RTN wsarecv_ptr = RTN_FindByName(img, "WSARecv");
-	if( wsarecv_ptr.is_valid() )
-	{
-		RTN_Open(wsarecv_ptr);
-		RTN_InsertCall(wsarecv_ptr, IPOINT_BEFORE, (AFUNPTR)wsarecv_before, IARG_INST_PTR, IARG_FUNCARG_ENTRYPOINT_VALUE, 1, IARG_FUNCARG_ENTRYPOINT_VALUE, 2, IARG_END);
-		RTN_InsertCall(wsarecv_ptr, IPOINT_AFTER, (AFUNPTR)wsarecv_after, IARG_INST_PTR, IARG_END);
-		fprintf(f, "[+] wait data %s %s\n", IMG_Name(img).c_str(), RTN_Name(wsarecv_ptr).c_str() );
-		RTN_Close(wsarecv_ptr);
-	}
 }
 
 void fini(INT32 code, VOID *v)
 {
 	list <ADDRINT>::iterator addr_it;
-	fprintf(f, "[+] tainted data still:\n");
-	for( addr_it = tainted_addrs.begin(); addr_it != tainted_addrs.end(); addr_it++ )
-		fprintf( f, "0x%08lx\n", *addr_it );
+	//fprintf(f, "[+] tainted data still:\n");
+	//for( addr_it = tainted_addrs.begin(); addr_it != tainted_addrs.end(); addr_it++ )
+	//	fprintf( f, HEX_FMT "\n", *addr_it );
 	
 	fflush(f);
 	fclose(f);
@@ -568,7 +630,7 @@ void fini(INT32 code, VOID *v)
 
 int main(int argc, char ** argv)
 {
-	const char *outfile_name;
+	const char *outfile_name, *taint_data_filename;
 	if( PIN_Init(argc, argv) )
 		return -1;
 
@@ -581,8 +643,17 @@ int main(int argc, char ** argv)
     high_boundary = Knob_to.Value();
     need_module = Knob_module.Value().c_str();
 
+    taint_data_filename = Knob_taint.Value().c_str();
+    taint_data_file = fopen(taint_data_filename, "rb");
+    taint_data = (unsigned char *) malloc(MAX_TAINT_DATA);
+    taint_data_len = fread(taint_data, 1, MAX_TAINT_DATA, taint_data_file);
+    fclose(taint_data_file);
+
 	outfile_name = Knob_outfile.Value().c_str();
 	f = fopen(outfile_name, "w");
+	fprintf(f, "[*] taint data %d bytes:\n", taint_data_len);
+	for(unsigned int i = 0 ; i < taint_data_len; i++)
+		fprintf(f, "[*]  %X\n", taint_data[i]);
 
 	PIN_StartProgram();
 	return 0;
