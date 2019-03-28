@@ -3,7 +3,7 @@
 #include <list>
 #include <map>
 
-#define VERSION "0.35"
+#define VERSION "0.36"
 #define MAX_TAINT_DATA 0x1000
 
 #if defined(__i386__) || defined(_WIN32)
@@ -102,8 +102,8 @@ REG get_full_reg(REG reg)
 		case REG_BL:
 			return REG_GBX;
 
-		case REG_STACK_PTR:
-			return REG_STACK_PTR;
+	//	case REG_STACK_PTR:
+	//		return REG_STACK_PTR;
 
 		case REG_GBP:
 		case REG_BP:
@@ -363,19 +363,20 @@ void find_tainted_data(ADDRINT mem)
 	BOOL is_match = false;
 	list <ADDRINT>::iterator addr_it;
 
-	for(i = 0; i < taint_data_len; i++)
-		if( taint_data[i] == *(unsigned char *)mem )
-		{
-			is_match = true;
-			mem -= i;
-			break;
-		}
+	if(PIN_CheckReadAccess((VOID*)mem))
+		for(i = 0; i < taint_data_len; i++)
+			if( taint_data[i] == *(unsigned char *)mem )
+			{
+				is_match = true;
+				mem -= i;
+				break;
+			}
 
 	if(!is_match)
 		return;
 
 	for(i = 0; i < taint_data_len; i++)
-		if( taint_data[i] != ((unsigned char *)mem)[i] )
+		if( PIN_CheckReadAccess((VOID*)(mem+i)) && taint_data[i] != ((unsigned char *)mem)[i] )
 		{
 			is_match = false;
 			break;
@@ -404,6 +405,14 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, int rregs_count, REG * r
 	ADDRINT taint_memory_read = 0, taint_memory_write = 0, taint_memory_ptr = 0;
 	ADDRINT register_value = 0;
 	REG reg = (REG) 0;
+
+	ins_count++;
+
+	if(ins_count % 1000000 == 0)
+	{
+		fprintf(f, "[*] %d\n", ins_count);
+		fflush(f);
+	}
 
 	if(memop0_type == 1) find_tainted_data(memop0);
 	if(memop1_type == 1) find_tainted_data(memop1);
@@ -536,8 +545,6 @@ void ins_instrument(INS ins, VOID * v)
 	rregs = (REG *) malloc( rregs_count * sizeof(REG) );
 	wregs = (REG *) malloc( wregs_count * sizeof(REG) );
 
-	ins_count++;
-
 	if( rregs_count == -1 || wregs_count == -1 || mems_count == -1 )
 	{
 		fprintf(f, "[!] error " HEX_FMT "\n", eip);
@@ -584,7 +591,7 @@ void ins_instrument(INS ins, VOID * v)
 					IARG_UINT32, 0,
 					IARG_END);
 					break;
-			case 2: INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR) taint,
+			/*case 2: INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR) taint,
 					IARG_UINT32, PIN_ThreadId(),
 					IARG_ADDRINT, eip,
 					IARG_CONTEXT,
@@ -598,14 +605,20 @@ void ins_instrument(INS ins, VOID * v)
 					IARG_UINT32, INS_MemoryOperandIsWritten(ins, 1) ? 2 : 1,
 					IARG_MEMORYOP_EA, 1,
 					IARG_END);
-					break;
+					break;*/
 		}
 	}
 }
 
 void img_instrument(IMG img, VOID * v)
 {
-	modules.push_back( (MODULE){ .module = IMG_Name(img).c_str(), .low = IMG_LowAddress(img), .high = IMG_HighAddress(img) } );
+	MODULE *module;
+	module = (MODULE *)malloc(sizeof(MODULE));
+	module->module = IMG_Name(img).c_str();
+	module->low = IMG_LowAddress(img);
+	module->high = IMG_HighAddress(img);
+	modules.push_back(*module);
+	//modules.push_back( (MODULE){ .module = IMG_Name(img).c_str(), .low = IMG_LowAddress(img), .high = IMG_HighAddress(img) } );
 	if(need_module && strcasestr( IMG_Name(img).c_str(), need_module ) )
 	{
 		fprintf( f, "[+] module instrumented: " HEX_FMT " " HEX_FMT " %s\n", IMG_LowAddress(img), IMG_HighAddress(img), IMG_Name(img).c_str() );
@@ -626,6 +639,13 @@ void fini(INT32 code, VOID *v)
 	
 	fflush(f);
 	fclose(f);
+}
+
+EXCEPT_HANDLING_RESULT internal_exception(THREADID tid, EXCEPTION_INFO *pExceptInfo, PHYSICAL_CONTEXT *pPhysCtxt, VOID *v)
+{
+  fprintf( f, "! " HEX_FMT " %s\n", PIN_GetPhysicalContextReg(pPhysCtxt, REG_INST_PTR), PIN_ExceptionToString(pExceptInfo).c_str() );
+  fflush(f);
+  return EHR_UNHANDLED;
 }
 
 int main(int argc, char ** argv)
@@ -653,8 +673,9 @@ int main(int argc, char ** argv)
 	f = fopen(outfile_name, "w");
 	fprintf(f, "[*] taint data %d bytes:\n", taint_data_len);
 	for(unsigned int i = 0 ; i < taint_data_len; i++)
-		fprintf(f, "[*]  %X\n", taint_data[i]);
+		fprintf(f, "[*]  %02X\n", taint_data[i]);
 
+	PIN_AddInternalExceptionHandler(internal_exception, 0);
 	PIN_StartProgram();
 	return 0;
 }
