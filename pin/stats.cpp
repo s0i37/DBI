@@ -1,36 +1,72 @@
-#include "pin.h"
+#include "pin.H"
 #include <stdio.h>
 #include <map>
+#include <list>
 
 FILE * f;
-map <const char *, unsigned int> dlls;
-
-VOID do_instrument(char * dll)
+struct Module
 {
-	dlls[dll] = dlls[dll] + 1;
+	unsigned int id;
+	ADDRINT low_addr;
+	ADDRINT high_addr;
+	string name;
+};
+unsigned int modules_loaded = 0;
+list <struct Module> modules;
+map <unsigned int, unsigned int> modules_call;
+map <unsigned int, unsigned int> modules_exec;
+
+unsigned int get_module_id(ADDRINT addr)
+{
+	list <struct Module>::iterator it;
+	for( it = modules.begin(); it != modules.end(); it++ )
+		if( addr >= it->low_addr && addr <= it->high_addr )
+			return it->id;
+	return 0;
+}
+
+VOID do_exec(ADDRINT addr)
+{
+	unsigned int module_id;
+	if( (module_id = get_module_id(addr)) != 0 )
+		modules_exec[module_id]++;
+}
+
+VOID do_call(ADDRINT addr)
+{
+	unsigned int module_id;
+	if( (module_id = get_module_id(addr)) != 0 )
+		modules_call[module_id]++;
 }
 
 
 VOID img_instrument(IMG img, VOID * v)
 {
-	dlls.insert( pair <const char *, unsigned int> (IMG_Name(img).c_str(), 0) );
+	struct Module module = { ++modules_loaded, IMG_LowAddress(img), IMG_HighAddress(img), IMG_Name(img) };
+	modules.push_front( module );
+	modules_call[modules_loaded] = 0;
+	modules_exec[modules_loaded] = 0;
 }
 
 VOID rtn_instrument(RTN rtn, VOID *v)
 {
-	const char * dll = IMG_Name( SEC_Img( RTN_Sec(rtn) ) ).c_str();
-
 	RTN_Open(rtn);
-	RTN_InsertCall(rtn, IPOINT_BEFORE, (AFUNPTR)do_instrument, IARG_PTR, dll, IARG_END);
+	RTN_InsertCall(rtn, IPOINT_BEFORE, (AFUNPTR)do_call, IARG_ADDRINT, RTN_Address(rtn), IARG_END);
 	RTN_Close(rtn);
+}
+
+VOID ins_instrument(INS ins, VOID *v)
+{
+	INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)do_exec, IARG_ADDRINT, INS_Address(ins), IARG_END);
 }
 
 VOID fini(INT32 code, VOID *v)
 {
-	f = fopen("dlls.txt", "w");
-	map <const char *, unsigned int>::iterator it;
-	for(it = dlls.begin(); it != dlls.end(); it++ )
-		fprintf(f, "%s: %d\n", it->first, it->second );
+	f = fopen("stats.log", "w");
+	list <struct Module>::iterator module;
+	fprintf(f, "module\tcalls\texec\n");
+	for( module = modules.begin(); module != modules.end(); module++ )
+		fprintf(f, "%s\t%u\t%u\n", module->name.c_str(), modules_call[module->id], modules_exec[module->id]);
 	fclose(f);
 }
 
@@ -41,6 +77,7 @@ int main(int argc, char ** argv)
 		return -1;
 	IMG_AddInstrumentFunction(img_instrument, 0);
 	RTN_AddInstrumentFunction(rtn_instrument, 0);
+	INS_AddInstrumentFunction(ins_instrument, 0);
 	PIN_AddFiniFunction(fini, 0);
 	PIN_StartProgram();
 	return 0;
