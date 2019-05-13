@@ -3,6 +3,8 @@
 #include <map>
 #include <list>
 
+#define VERSION "0.11"
+
 FILE * f;
 struct Module
 {
@@ -15,6 +17,10 @@ unsigned int modules_loaded = 0;
 list <struct Module> modules;
 map <unsigned int, unsigned int> modules_call;
 map <unsigned int, unsigned int> modules_exec;
+unsigned int instructions = 0;
+unsigned int max_instructions = 0;
+
+KNOB<ADDRINT> Knob_max_inst(KNOB_MODE_WRITEONCE, "pintool", "max_inst", "0", "maximum count of instructions");
 
 unsigned int get_module_id(ADDRINT addr)
 {
@@ -25,11 +31,28 @@ unsigned int get_module_id(ADDRINT addr)
 	return 0;
 }
 
+void save_stats()
+{
+	f = fopen("stats.log", "w");
+	list <struct Module>::iterator module;
+	fprintf(f, "module\tcalls\texec\n");
+	for( module = modules.begin(); module != modules.end(); module++ )
+		fprintf(f, "%s\t%u\t%u\n", module->name.c_str(), modules_call[module->id], modules_exec[module->id]);
+	fclose(f);
+}
+
 VOID do_exec(ADDRINT addr)
 {
 	unsigned int module_id;
 	if( (module_id = get_module_id(addr)) != 0 )
 		modules_exec[module_id]++;
+
+	instructions += 1;
+	if(instructions == max_instructions)
+	{
+		save_stats();
+		PIN_Detach();
+	}
 }
 
 VOID do_call(ADDRINT addr)
@@ -60,14 +83,10 @@ VOID ins_instrument(INS ins, VOID *v)
 	INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)do_exec, IARG_ADDRINT, INS_Address(ins), IARG_END);
 }
 
+
 VOID fini(INT32 code, VOID *v)
 {
-	f = fopen("stats.log", "w");
-	list <struct Module>::iterator module;
-	fprintf(f, "module\tcalls\texec\n");
-	for( module = modules.begin(); module != modules.end(); module++ )
-		fprintf(f, "%s\t%u\t%u\n", module->name.c_str(), modules_call[module->id], modules_exec[module->id]);
-	fclose(f);
+	save_stats();
 }
 
 int main(int argc, char ** argv)
@@ -75,6 +94,7 @@ int main(int argc, char ** argv)
 	PIN_InitSymbols();
 	if( PIN_Init(argc, argv) )
 		return -1;
+	max_instructions = Knob_max_inst.Value();
 	IMG_AddInstrumentFunction(img_instrument, 0);
 	RTN_AddInstrumentFunction(rtn_instrument, 0);
 	INS_AddInstrumentFunction(ins_instrument, 0);
