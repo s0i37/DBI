@@ -1,6 +1,33 @@
-
-Interceptor.attach( new NativeFunction( ptr(0x0000563729465099), 'void', [] ),
+[
+0x00000000,
+0x00000002,
+0x00000008,
+0x00000010,
+0x00002e78,
+0x00002e88,
+0x00002e8d,
+0x00002eb0,
+0x00002eb8,
+0x00002ec0,
+0x00002ec8,
+0x00002ed0,
+0x00002ed8,
+0x00002ee0,
+0x00002ee8,
+0x00002ef0,
+0x00002ef8,
+0x00002f00,
+0x00002f08,
+0x00002f10,
+0x00002f18,
+0x00002f20,
+0x00002f28,
+0x00002f30,
+]
+.forEach( function(bb) {
+	Interceptor.attach( new NativeFunction( ptr(0x000056343b4fb000 + bb), 'void', [] ),
 	{
-		onEnter: function(args) { send(0x0000563729465099) }
-	}
-)
+		onEnter: function(args) { send(bb) }
+	} )
+	console.log("[+] instrumented " + bb)
+} )

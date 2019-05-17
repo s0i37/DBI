@@ -9,10 +9,13 @@ if len(argv) != 3:
 	exit()
 
 def on_message(msg, data):
-	bb = msg['payload']
-	print bb
-	byte = unpack( 'b', shm.read(1, bb%0x10000) )[0]
-	shm.write( pack('b', byte+1), bb%0x10000 )
+	try:
+		bb = msg['payload']
+		print bb
+		byte = unpack( 'B', shm.read(1, bb%0x10000) )[0]
+		shm.write( pack('B', (byte+1)%0x100), bb%0x10000 )
+	except Exception as e:
+		print msg
 
 JS = open( argv[2] ).read()
 SHM_KEY = 0x20137
