@@ -7,9 +7,8 @@
 int main(int argc, const char **argv)
 {
    int shmid;
-   key_t key = 0x20137;
-   char *shared_memory;
+   key_t key = 0x1337;
 
-   if ((shmid = shmget(key, 0xffff, IPC_CREAT | 0666)) < 0)
+   if ((shmid = shmget(key, 0x10000, IPC_CREAT | IPC_EXCL | 0666)) < 0)
       printf("Error getting shared memory id");
 }
