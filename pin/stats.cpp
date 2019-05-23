@@ -3,9 +3,10 @@
 #include <map>
 #include <list>
 
-#define VERSION "0.11"
+#define VERSION "0.12"
 
 FILE * f;
+const char * outfile_name;
 struct Module
 {
 	unsigned int id;
@@ -20,6 +21,7 @@ map <unsigned int, unsigned int> modules_exec;
 unsigned int instructions = 0;
 unsigned int max_instructions = 0;
 
+KNOB<string> Knob_outfile(KNOB_MODE_WRITEONCE,  "pintool", "outfile", "stats.log", "Output file");
 KNOB<ADDRINT> Knob_max_inst(KNOB_MODE_WRITEONCE, "pintool", "max_inst", "0", "maximum count of instructions");
 
 unsigned int get_module_id(ADDRINT addr)
@@ -33,7 +35,7 @@ unsigned int get_module_id(ADDRINT addr)
 
 void save_stats()
 {
-	f = fopen("stats.log", "w");
+	f = fopen(outfile_name, "w");
 	list <struct Module>::iterator module;
 	fprintf(f, "module\tcalls\texec\n");
 	for( module = modules.begin(); module != modules.end(); module++ )
@@ -94,7 +96,10 @@ int main(int argc, char ** argv)
 	PIN_InitSymbols();
 	if( PIN_Init(argc, argv) )
 		return -1;
+
+	outfile_name = Knob_outfile.Value().c_str();
 	max_instructions = Knob_max_inst.Value();
+
 	IMG_AddInstrumentFunction(img_instrument, 0);
 	RTN_AddInstrumentFunction(rtn_instrument, 0);
 	INS_AddInstrumentFunction(ins_instrument, 0);

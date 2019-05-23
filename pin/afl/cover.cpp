@@ -3,12 +3,20 @@
 #include <cstdlib>
 #include <iostream>
 
-#define VERSION "0.39"
+#define VERSION "0.42"
 
 #ifdef _WIN64
     #define __win__ 1
 #elif _WIN32
     #define __win__ 1
+#endif
+
+#if defined(__i386__) || defined(_WIN32)
+    #define HEX_FMT "0x%08x"
+    #define INT_FMT "%u"
+#elif defined(__x86_64__) || defined(_WIN64)
+    #define HEX_FMT "0x%08lx"
+    #define INT_FMT "%lu"
 #endif
 
 #ifdef __linux__
@@ -35,22 +43,24 @@
 
 //  CLI options -----------------------------------------------------------
 
-KNOB<BOOL> Knob_debug(KNOB_MODE_WRITEONCE,  "pintool", "debug", "0", "Enable debug mode");
-KNOB<ADDRINT> Knob_entry(KNOB_MODE_WRITEONCE, "pintool", "entry", "0", "start address for coverage signal");
+KNOB<string> Knob_debugfile(KNOB_MODE_WRITEONCE,  "pintool", "debug", "", "Enable debug mode");
+KNOB<string> Knob_module(KNOB_MODE_WRITEONCE,  "pintool", "module", "", "coverage just this module range");
 KNOB<ADDRINT> Knob_exit(KNOB_MODE_WRITEONCE, "pintool", "exit", "0", "stop address for coverage signal");
 
 //  Global Vars -----------------------------------------------------------
 
+string cover_module;
+string debug_file;
 BOOL coverage_enable = TRUE;
 ADDRINT min_addr = 0;
 ADDRINT max_addr = 0;
-ADDRINT entry_addr = 0;
 ADDRINT exit_addr = 0;
 
 unsigned char bitmap[MAP_SIZE];
 uint8_t *bitmap_shm = 0;
 
 ADDRINT last_id = 0;
+FILE *f = 0;
 
 //  inlined functions -----------------------------------------------------
 
@@ -77,41 +87,26 @@ VOID fuzzer_synchronization(char *cmd)
 VOID TrackBranch(ADDRINT cur_addr)
 {
     ADDRINT cur_id = cur_addr - min_addr;
-
-    if (Knob_debug) {
-        std::cout << "\nCURADDR:  0x" << cur_addr << std::endl;
-        std::cout << "rel_addr: 0x" << (cur_addr - min_addr) << std::endl;
-        std::cout << "cur_id:  " << cur_id << std::endl;
-        std::cout << "index:  " << ((cur_id ^ last_id) % MAP_SIZE) << std::endl;
-    }
-
-    if(coverage_enable)
+    if(f)
     {
-        if (bitmap_shm != 0){
-            bitmap_shm[((cur_id ^ last_id) % MAP_SIZE)]++;
-        }
-        else {
-            bitmap[((cur_id ^ last_id) % MAP_SIZE)]++;
-        }
+        fprintf(f, "0x%lx 0x%x\n", cur_addr, (UINT32)cur_id);
+        fflush(f);
     }
+
+    if (bitmap_shm != 0)
+        bitmap_shm[((cur_id ^ last_id) % MAP_SIZE)]++;
+    else
+        bitmap[((cur_id ^ last_id) % MAP_SIZE)]++;
     last_id = cur_id;
 
-    if(entry_addr && entry_addr == cur_id)
-    {
-        std::cout << "entry" << std::endl;
-        coverage_enable = TRUE;
-    }
-    else if(exit_addr && exit_addr == cur_id)
-    {
-        std::cout << "exit" << std::endl;
-        coverage_enable = FALSE;
+
+    if(exit_addr && exit_addr == cur_id)
         fuzzer_synchronization( (char *) "e" );
-    }
 }
 
 //  Analysis functions ----------------------------------------------------
 
-VOID Trace(TRACE trace, VOID *v)
+VOID bb_instrument(TRACE trace, VOID *v)
 {
     for (BBL bbl = TRACE_BblHead(trace); BBL_Valid(bbl); bbl = BBL_Next(bbl))
     {
@@ -122,14 +117,8 @@ VOID Trace(TRACE trace, VOID *v)
             {
                 if (INS_IsBranch(ins)) {
                     // As per afl-as.c we only care about conditional branches (so no JMP instructions)
-                    if (INS_HasFallThrough(ins) || INS_IsCall(ins))
+                    if (1 /*INS_HasFallThrough(ins) || INS_IsCall(ins)*/)
                     {
-                        if (Knob_debug) {
-                            
-                            std::cout << "BRACH: 0x" << std::hex << INS_Address(ins) << ":\t" << INS_Disassemble(ins) << std::endl;
-                        }
-
-                        // Instrument the code.
                         INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)TrackBranch,
                             IARG_INST_PTR,
                             IARG_END);
@@ -140,55 +129,20 @@ VOID Trace(TRACE trace, VOID *v)
     }
 }
 
-VOID entry_point(VOID *ptr)
+
+VOID img_instrument(IMG img, VOID *v)
 {
-    /*  Much like the original instrumentation from AFL we only want to instrument the segments of code
-     *  from the actual application and not the link and PIN setup itself.
-     *
-     *  Inspired by: http://joxeankoret.com/blog/2012/11/04/a-simple-pin-tool-unpacker-for-the-linux-version-of-skype/
-     */
-
-    IMG img = APP_ImgHead();
-    for(SEC sec= IMG_SecHead(img); SEC_Valid(sec); sec = SEC_Next(sec))
+    if(f)
+        fprintf( f, "[*] module %s " HEX_FMT " " HEX_FMT "\n", IMG_Name(img).c_str(), IMG_LowAddress(img), IMG_HighAddress(img) );
+    if(cover_module != "" && strcasestr( IMG_Name(img).c_str(), cover_module.c_str() ) )
     {
-        // lets sanity check the exec flag 
-        // TODO: the check for .text name might be too much, there could be other executable segments we
-        //       need to instrument but maybe not things like the .plt or .fini/init
-        // IF this changes, we need to change the code in the instrumentation code, save all the base addresses.
-
-        if (SEC_IsExecutable(sec) && SEC_Name(sec) == ".text")
-        {
-            ADDRINT sec_addr = SEC_Address(sec);
-            UINT64  sec_size = SEC_Size(sec);
-            
-            if (Knob_debug)
-            {
-                std::cout << "Name: " << SEC_Name(sec) << std::endl;
-                std::cout << "Addr: 0x" << std::hex << sec_addr << std::endl;
-                std::cout << "Size: " << sec_size << std::endl << std::endl;
-            }
-
-            if (sec_addr != 0)
-            {
-                ADDRINT high_addr = sec_addr + sec_size;
-
-                if (sec_addr > min_addr || min_addr == 0)
-                    min_addr = sec_addr;
-
-                // Now check and set the max_addr.
-                if (sec_addr > max_addr || max_addr == 0)
-                    max_addr = sec_addr;
-
-                if (high_addr > max_addr)
-                    max_addr = high_addr;
-            }
-        }
+        if(f)
+            fprintf( f, "[+] module instrumented: " HEX_FMT " " HEX_FMT " %s\n", IMG_LowAddress(img), IMG_HighAddress(img), IMG_Name(img).c_str() );
+        min_addr = IMG_LowAddress(img);
+        max_addr = IMG_HighAddress(img);
     }
-    if (Knob_debug)
-    {
-        std::cout << "min_addr:\t0x" << std::hex << min_addr << std::endl;
-        std::cout << "max_addr:\t0x" << std::hex << max_addr << std::endl << std::endl;
-    }   
+    if(f)
+        fflush(f);
 }
 
 // Main functions ------------------------------------------------
@@ -197,7 +151,7 @@ INT32 Usage()
 {
     std::cerr << "AFLPIN -- A pin tool to enable blackbox binaries to be fuzzed with AFL on Linux/Windows" << std::endl;
     std::cerr << "   -debug --  prints extra debug information." << std::endl;
-    std::cerr << "   -entry 0xADDR --  start address for coverage signal." << std::endl;
+    std::cerr << "   -module modulename --  prints extra debug information." << std::endl;
     std::cerr << "   -exit 0xADDR --  stop address for coverage signal." << std::endl;
     return -1;
 }
@@ -232,7 +186,7 @@ bool write_to_pipe(char *cmd)
     //if( access("afl_sync", F_OK ) == -1 )
     //    mkfifo("afl_sync", 777);
     if(afl_sync_fd == -1)
-        afl_sync_fd = open("afl_sync", O_WRONLY);
+        afl_sync_fd = open(getenv("PIPE_SYNC"), O_WRONLY);
     write(afl_sync_fd, cmd, 1);
     return true;
 }
@@ -315,26 +269,29 @@ int main(int argc, char *argv[])
     setup_shm();
     #endif
 
-    entry_addr = Knob_entry.Value();
     exit_addr = Knob_exit.Value();
+    cover_module = Knob_module.Value();
+    debug_file = Knob_debugfile.Value();
+    if(debug_file != "")
+        f = fopen(debug_file.c_str(), "w");
 
     PIN_SetSyntaxIntel();
-    TRACE_AddInstrumentFunction(Trace, 0);
+    IMG_AddInstrumentFunction(img_instrument, 0);
+    TRACE_AddInstrumentFunction(bb_instrument, 0);
 
     #ifdef __win__
     PIN_AddContextChangeFunction(context_change, 0);
     #elif __linux__
     PIN_InterceptSignal(SIGSEGV, on_crash, 0);
     #endif
-    PIN_AddApplicationStartFunction(entry_point, 0);
     PIN_StartProgram();
 
     // AFL_NO_FORKSRV=1
     // We could use this main function to talk to the fork server's fd and then enable the fork server with this tool...
 }
 
-// https://github.com/carlosgprado/BrundleFuzz/blob/master/client_windows/MyPinTool.cpp
 /*
-TODO:
- разделить afl/cover.cpp и winafl/cover.cpp
+For fuzzing in attach mode, with manual instrumentation.
+__AFL_SHM_ID=$((0x1337)) PIPE_SYNC=/opt/afl/afl_sync pin -t /path/to/this/afl/obj-intel64/cover.so -- /usr/bin/daemon
+__AFL_SHM_ID=$((0x1337)) AFL_NO_FORKSRV=1 AFL_SKIP_BIN_CHECK=1 ./afl-fuzz -i in -o out -N -T 'daemon' -- python wrap.py 127.0.0.1 1234
 */
