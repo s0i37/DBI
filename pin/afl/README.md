@@ -1,4 +1,18 @@
-Instrumentation for inmemory fuzzing with afl
+### Instrumentation for common fuzzing with AFL
+
+#### Build
+
+`make PIN_ROOT=/path/to/pin`
+
+#### Instrument
+
+`__AFL_SHM_ID=$((0x1337)) PIPE_SYNC=/opt/afl/afl_sync pin -follow_execv -pid 12345 -t /path/to/DBI/pin/afl/obj-intel64/cover.so -module libsome.so.0 -exit 0xd7c1`
+
+#### Fuzzing
+
+Fuzz with https://github.com/s0i37/afl
+
+### Instrumentation for inmemory fuzzing with AFL
 
 #### Build
 
@@ -10,4 +24,4 @@ Instrumentation for inmemory fuzzing with afl
 
 #### Fuzzing
 
-Fuzz through https://github.com/s0i37/afl
+Fuzz with https://github.com/s0i37/afl_inmemory
