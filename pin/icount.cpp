@@ -33,7 +33,7 @@ END_LEGAL */
 #include <stdio.h>
 #include <stdlib.h>
 
-UINT64 icount = 0;
+long unsigned int icount = 0;
 const char * outfile_name;
 FILE *f;
 
