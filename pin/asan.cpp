@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <iostream>
 
-#define VERSION "0.32"
+#define VERSION "0.35"
 
 #define ALLOCATE 1
 #define FREE !ALLOCATE
@@ -28,6 +28,10 @@
 	#define INT_FMT "%lu"
 #endif
 
+#ifdef __linux__
+    #include <signal.h>
+#endif
+
 struct Heap
 {
 	ADDRINT base;
@@ -42,7 +46,7 @@ struct Module
 	string name;
 };
 map < int, deque<ADDRINT> > _calls;
-map < int, bool > enable_tracing;
+map < int, bool > stop_tracing;
 ADDRINT allocate_ptr;
 ADDRINT free_ptr;
 unsigned int malloc_size = 0;
@@ -55,8 +59,7 @@ FILE *f;
 list <struct Module> modules;
 list <struct Heap> heap_list;
 
-KNOB<BOOL> Knob_debug(KNOB_MODE_WRITEONCE,  "pintool", "debug", "0", "Enable debug mode");
-KNOB<string> Knob_outfile(KNOB_MODE_WRITEONCE, "pintool", "outfile", "asan.log", "report file");
+KNOB<string> Knob_debugfile(KNOB_MODE_WRITEONCE,  "pintool", "debug", "asan.log", "violations log");
 KNOB<string> Knob_module(KNOB_MODE_WRITEONCE,  "pintool", "module", "", "sanitize just this module");
 
 
@@ -83,7 +86,7 @@ void print_callstack(UINT32 threadid)
 		return;
 	deque<ADDRINT>::iterator it = _calls[threadid].end();
 	while( it-- != _calls[threadid].begin() )
-		printf( "\t+" HEX_FMT " %s\n", *it - get_module_base(*it), get_module_name(*it).c_str() );
+		fprintf( f, "\t+" HEX_FMT " %s\n", *it - get_module_base(*it), get_module_name(*it).c_str() );
 }
 
 void dotrace_CALL(UINT32 threadid, ADDRINT eip)
@@ -103,45 +106,47 @@ void dotrace_RET(UINT32 threadid)
 
 void dotrace_allocate_before(UINT32 threadid, ADDRINT eip, unsigned int size)
 {
-	enable_tracing[threadid] = false;
-	//printf("allocate(): disable_instrumentation\n");
+	//fprintf(f, "dotrace_allocate_before %d\n", threadid);
+	stop_tracing[threadid] = true;
+	//fprintf(f, "allocate(): disable_instrumentation\n");
 	malloc_size = size;
 	malloc_call_addr = eip;
 	if(size == 0)
 	{
-		printf( "[!] allocate(NULL) in +" HEX_FMT " %s\n", eip - get_module_base(eip), get_module_name(eip).c_str());
+		fprintf(f, "[!] allocate(NULL) in +" HEX_FMT " %s\n", eip - get_module_base(eip), get_module_name(eip).c_str());
 		print_callstack(threadid);
+		fflush(f);
 	}
 }
 
 void dotrace_allocate_after(UINT32 threadid, ADDRINT eip, ADDRINT addr)
 {
-	enable_tracing[threadid] = true;
+	//fprintf(f, "dotrace_allocate_after %d\n", threadid);
+	stop_tracing[threadid] = false;
 	if( addr == 0 )
 	{
-		printf( "[!] allocate(" INT_FMT ") = 0 in +" HEX_FMT " %s\n", malloc_size, malloc_call_addr - get_module_base(malloc_call_addr), get_module_name(eip).c_str());
+		fprintf(f, "[+] allocate(0x%x) = 0 in +" HEX_FMT " %s\n", malloc_size, malloc_call_addr - get_module_base(malloc_call_addr), get_module_name(eip).c_str());
 		print_callstack(threadid);
+		fflush(f);
 		return;
 	}
 	list <struct Heap>::iterator it;
 	for( it = heap_list.begin(); it != heap_list.end(); it++ )
 		if( it->base == addr )
 		{
-			if(Knob_debug)
+			if( it->status == ALLOCATE )
 			{
-				if( it->status == ALLOCATE )
-				{
-					printf("[*] reallocate(" INT_FMT ") usable memory " HEX_FMT " in " HEX_FMT "\n", malloc_size, addr, malloc_call_addr);
-				}
-				else
-				{
-					printf("[*] allocate(" INT_FMT ") old memory " HEX_FMT " in " HEX_FMT "\n", malloc_size, addr, malloc_call_addr);
-				}
+				fprintf(f, "[+] reallocate(0x%x) usable memory " HEX_FMT " in " HEX_FMT "\n", malloc_size, addr, malloc_call_addr);
+				fflush(f);
+			}
+			else
+			{
+				fprintf(f, "[+] allocate(0x%x) old memory " HEX_FMT " in " HEX_FMT "\n", malloc_size, addr, malloc_call_addr);
+				fflush(f);
 			}
 			it->size = malloc_size;
 			it->status = ALLOCATE;
 			it->check = !CHECKED;
-			printf("[*] allocate(" INT_FMT ") new memory " HEX_FMT " in " HEX_FMT "\n", malloc_size, addr, malloc_call_addr);
 			return;
 		}
 
@@ -151,29 +156,35 @@ void dotrace_allocate_after(UINT32 threadid, ADDRINT eip, ADDRINT addr)
 	heap.status = ALLOCATE;
 	heap.check = !CHECKED;
 	heap_list.push_front(heap);
+	fprintf(f, "[+] allocate(0x%x) new memory " HEX_FMT " in " HEX_FMT "\n", malloc_size, addr, malloc_call_addr);
+	fflush(f);
 }
 
 void dotrace_free_before(UINT32 threadid, ADDRINT eip, ADDRINT addr)
 {
-	//enable_tracing[threadid] = false;
+	//fprintf(f, "dotrace_free_before %d\n", threadid);
+	//stop_tracing[threadid] = true;
+	fprintf(f, "[-] free(" HEX_FMT ") in +" HEX_FMT " %s\n", addr, eip - get_module_base(eip), get_module_name(eip).c_str());
 	list <struct Heap>::iterator it;
 	for( it = heap_list.begin(); it != heap_list.end(); it++ )
 		if( it->base == addr )
 		{
 			if( it->status == FREE )
 			{
-				printf( "[!] double-free " HEX_FMT " in +" HEX_FMT " %s (" INT_FMT ")\n", addr, eip - get_module_base(eip), get_module_name(eip).c_str(), threadid);
+				fprintf(f, "[!] double-free " HEX_FMT " in +" HEX_FMT " %s\n", addr, eip - get_module_base(eip), get_module_name(eip).c_str());
 				print_callstack(threadid);
 			}
 			it->status = FREE;
 			it->check = !CHECKED;
 			break;
 		}
+	fflush(f);
 }
 
 void dotrace_free_after(UINT32 threadid)
 {
-	//enable_tracing[threadid] = true;
+	//fprintf(f, "dotrace_free_after %d\n", threadid);
+	//stop_tracing[threadid] = false;
 }
 
 
@@ -181,7 +192,7 @@ void dotrace_free_after(UINT32 threadid)
 void dotrace_check(UINT32 threadid, ADDRINT eip, ADDRINT ptr, BOOL is_reg)
 {
 	ADDRINT addr;
-	if(! enable_tracing[threadid] )
+	if(stop_tracing[threadid])
 		return;
 	if(is_reg)
 		addr = ptr;
@@ -198,15 +209,16 @@ void dotrace_check(UINT32 threadid, ADDRINT eip, ADDRINT ptr, BOOL is_reg)
 
 void dotrace_use_mem(UINT32 threadid, ADDRINT eip, ADDRINT addr, CONTEXT *ctx)
 {
-	if(! enable_tracing[threadid] )
+	if(stop_tracing[threadid])
 		return;
 
 	list <struct Heap>::iterator it;
 	for( it = heap_list.begin(); it != heap_list.end(); it++ )
 		if( (addr >= it->base - CHUNK_SIZE && addr < it->base) || (addr > it->base + it->size && addr <= it->base + it->size + CHUNK_SIZE) )
 		{
-			printf( "[!] OOB heap " HEX_FMT " (chunk " HEX_FMT ") in +" HEX_FMT " %s\n", addr, it->base, eip - get_module_base(eip), get_module_name(eip).c_str());
+			fprintf(f, "[!] OOB heap " HEX_FMT " (chunk " HEX_FMT ") in +" HEX_FMT " %s\n", addr, it->base, eip - get_module_base(eip), get_module_name(eip).c_str());
 			print_callstack(threadid);
+			fflush(f);
 		}
 
 	for( it = heap_list.begin(); it != heap_list.end(); it++ )
@@ -216,16 +228,18 @@ void dotrace_use_mem(UINT32 threadid, ADDRINT eip, ADDRINT addr, CONTEXT *ctx)
 			{
 				if(eip >= low_boundary && eip <= high_boundary)
 				{
-					printf( "[!] UAF " HEX_FMT " in +" HEX_FMT " %s\n", addr, eip - get_module_base(eip), get_module_name(eip).c_str());
+					fprintf(f, "[!] UAF " HEX_FMT " in +" HEX_FMT " %s\n", addr, eip - get_module_base(eip), get_module_name(eip).c_str());
 					print_callstack(threadid);
+					fflush(f);
 				}
 			}
 			else if( it->check != CHECKED )
 			{
 				if(eip >= low_boundary && eip <= high_boundary)
 				{
-					printf( "[!] UWC " HEX_FMT " in +" HEX_FMT " %s\n", addr, eip - get_module_base(eip), get_module_name(eip).c_str());
+					fprintf(f, "[!] UWC " HEX_FMT " in +" HEX_FMT " %s\n", addr, eip - get_module_base(eip), get_module_name(eip).c_str());
 					print_callstack(threadid);
+					fflush(f);
 				}
 			}
 			
@@ -328,13 +342,12 @@ void img_instrument(IMG img, VOID * v)
 	//RTN rtn;
 	if( need_module && strcasestr( IMG_Name(img).c_str(), need_module ) )
 	{
-		if(Knob_debug)
-			printf( "[+] module " HEX_FMT " " HEX_FMT " %s\n", IMG_LowAddress(img), IMG_HighAddress(img), IMG_Name(img).c_str() );
+		fprintf(f, "[+] module " HEX_FMT " " HEX_FMT " %s\n", IMG_LowAddress(img), IMG_HighAddress(img), IMG_Name(img).c_str() );
 		low_boundary = IMG_LowAddress(img);
 		high_boundary = IMG_HighAddress(img);
 	}
-	else if(Knob_debug)
-		printf( "[*] module " HEX_FMT " " HEX_FMT " %s\n", IMG_LowAddress(img), IMG_HighAddress(img), IMG_Name(img).c_str() );
+	else
+		fprintf(f, "[*] module " HEX_FMT " " HEX_FMT " %s\n", IMG_LowAddress(img), IMG_HighAddress(img), IMG_Name(img).c_str() );
 	struct Module module = { IMG_LowAddress(img), IMG_HighAddress(img), IMG_Name(img) };
 	modules.push_front( module );
 	fflush(f);
@@ -349,8 +362,7 @@ void img_instrument(IMG img, VOID * v)
 			RTN_Open(allocate);
 			RTN_InsertCall(allocate, IPOINT_BEFORE, (AFUNPTR)dotrace_allocate_before, IARG_UINT32, PIN_ThreadId(), IARG_INST_PTR, IARG_FUNCARG_ENTRYPOINT_VALUE, 2, IARG_END);
 			RTN_InsertCall(allocate, IPOINT_AFTER, (AFUNPTR)dotrace_allocate_after, IARG_UINT32, PIN_ThreadId(), IARG_INST_PTR, IARG_FUNCRET_EXITPOINT_VALUE, IARG_END);
-			if(Knob_debug)
-				printf( "[+] function %s %s\n", IMG_Name(img).c_str(), RTN_Name(allocate).c_str() );
+			fprintf(f, "[+] function %s %s\n", IMG_Name(img).c_str(), RTN_Name(allocate).c_str() );
 			fflush(f);
 			RTN_Close(allocate);
 		}
@@ -360,14 +372,13 @@ void img_instrument(IMG img, VOID * v)
 			RTN_Open(_free);
 			RTN_InsertCall(_free, IPOINT_BEFORE, (AFUNPTR)dotrace_free_before, IARG_UINT32, PIN_ThreadId(), IARG_INST_PTR, IARG_FUNCARG_ENTRYPOINT_VALUE, 2, IARG_END);
 			RTN_InsertCall(_free, IPOINT_AFTER, (AFUNPTR)dotrace_free_after, IARG_UINT32, PIN_ThreadId(), IARG_END);
-			if(Knob_debug)
-				printf( "[+] function %s %s\n", IMG_Name(img).c_str(), RTN_Name(_free).c_str() );
+			fprintf(f, "[+] function %s %s\n", IMG_Name(img).c_str(), RTN_Name(_free).c_str() );
 			fflush(f);
 			RTN_Close(_free);
 		}
 	#elif __linux__
 
-		if( strcasestr( "libc.so.6", IMG_Name(img).c_str() ) != 0 )
+		if( strcasestr( IMG_Name(img).c_str(), "libc.so" ) == 0 )
 			return;
 
 		RTN allocate = RTN_FindByName(img, "malloc");	/* void *malloc(size_t size); 	*/
@@ -380,8 +391,7 @@ void img_instrument(IMG img, VOID * v)
 			RTN_Open(allocate);
 			RTN_InsertCall(allocate, IPOINT_BEFORE, (AFUNPTR)dotrace_allocate_before, IARG_UINT32, PIN_ThreadId(), IARG_INST_PTR, IARG_FUNCARG_ENTRYPOINT_VALUE, 0, IARG_END);
 			RTN_InsertCall(allocate, IPOINT_AFTER, (AFUNPTR)dotrace_allocate_after, IARG_UINT32, PIN_ThreadId(), IARG_INST_PTR, IARG_FUNCRET_EXITPOINT_VALUE, IARG_END);
-			if(Knob_debug)
-				printf( "[+] function %s %s\n", IMG_Name(img).c_str(), RTN_Name(allocate).c_str() );
+			fprintf(f, "[+] function %s %s\n", IMG_Name(img).c_str(), RTN_Name(allocate).c_str() );
 			fflush(f);
 			RTN_Close(allocate);
 		}
@@ -390,10 +400,9 @@ void img_instrument(IMG img, VOID * v)
 			free_ptr = RTN_Address(_free);
 			RTN_Open(_free);
 			RTN_InsertCall(_free, IPOINT_BEFORE, (AFUNPTR)dotrace_free_before, IARG_UINT32, PIN_ThreadId(), IARG_INST_PTR, IARG_FUNCARG_ENTRYPOINT_VALUE, 0, IARG_END);
-			//RTN_InsertCall(_free, IPOINT_AFTER, (AFUNPTR)dotrace_free_after, IARG_UINT32, PIN_ThreadId(), IARG_END);
+			RTN_InsertCall(_free, IPOINT_AFTER, (AFUNPTR)dotrace_free_after, IARG_UINT32, PIN_ThreadId(), IARG_END);
 			/* dotrace_free_after() не срабатывает. Требуется ограничить трассировку внутри free() */
-			if(Knob_debug)
-				printf( "[+] function %s %s\n", IMG_Name(img).c_str(), RTN_Name(_free).c_str() );
+			fprintf(f, "[+] function %s %s\n", IMG_Name(img).c_str(), RTN_Name(_free).c_str() );
 			fflush(f);
 			RTN_Close(_free);
 		}
@@ -403,7 +412,7 @@ void img_instrument(IMG img, VOID * v)
 		for( rtn = SEC_RtnHead(sec); RTN_Valid(rtn); rtn = RTN_Next(rtn) )
 		{
 			RTN_Open(rtn);
-			printf( "[debug] function %s 0x%08lx %lu\n", RTN_Name(rtn).c_str(), RTN_Address(rtn), RTN_Range(rtn) );
+			fprintf(f, "[debug] function %s 0x%08lx %lu\n", RTN_Name(rtn).c_str(), RTN_Address(rtn), RTN_Range(rtn) );
 			RTN_Close(rtn);
 		}*/
 }
@@ -415,9 +424,9 @@ void summary(void)
 		if( it->status == ALLOCATE )
 		{
 			if( it->check != CHECKED )
-				printf( "[!] memory leak (no checked): " HEX_FMT "\n", it->base );
+				fprintf(f, "[!] memory leak (no checked): " HEX_FMT "\n", it->base );
 			else
-				printf( "[!] memory leak " HEX_FMT "\n", it->base );
+				fprintf(f, "[!] memory leak " HEX_FMT "\n", it->base );
 			fflush(f);
 		}
 }
@@ -429,9 +438,30 @@ void fini(INT32 code, VOID *v)
 	fclose(f);
 }
 
+#ifdef __win__
+void context_change(THREADID tid, CONTEXT_CHANGE_REASON reason, const CONTEXT *ctxtFrom, CONTEXT *ctxtTo, INT32 info, VOID *v)
+{
+    if(reason == CONTEXT_CHANGE_REASON_EXCEPTION)
+    {
+        fprintf(f, "[!] EXCEPTION 0x%08x\n", info);
+        if(info == 0xc0000005)
+            fprintf(f, "[!] ACCESS VIOLATION")
+        fflush(f);
+    }
+}
+#elif __linux__
+bool on_crash(unsigned int threadId, int sig, CONTEXT* ctx, bool hasHandler, const EXCEPTION_INFO* pExceptInfo, void* v)
+{
+  fprintf(f, "[!] SIGSEGV\n");
+  fflush(f);
+  return true;
+}
+#endif
+
 EXCEPT_HANDLING_RESULT internal_exception(THREADID tid, EXCEPTION_INFO *pExceptInfo, PHYSICAL_CONTEXT *pPhysCtxt, VOID *v)
 {
-  printf( "[x] internal_exception in " HEX_FMT "\n", PIN_GetPhysicalContextReg(pPhysCtxt, REG_INST_PTR) );
+  fprintf(f, "[x] internal_exception in " HEX_FMT "\n", PIN_GetPhysicalContextReg(pPhysCtxt, REG_INST_PTR) );
+  fflush(f);
   return EHR_HANDLED;
 }
 
@@ -446,8 +476,14 @@ int main(int argc, char ** argv)
 	PIN_AddFiniFunction(fini, 0);
 	PIN_AddInternalExceptionHandler(internal_exception, 0);
 
+	#ifdef __win__
+    PIN_AddContextChangeFunction(context_change, 0);
+    #elif __linux__
+    PIN_InterceptSignal(SIGSEGV, on_crash, 0);
+    #endif
+
 	need_module = Knob_module.Value().c_str();
-	f = fopen( Knob_outfile.Value().c_str(), "w" );
+	f = fopen( Knob_debugfile.Value().c_str(), "w" );
 	PIN_StartProgram();
 	return 0;
 }
@@ -474,4 +510,5 @@ TODO non-crashable checks:
 2)	RTN_InsertCall(_free, IPOINT_AFTER, (AFUNPTR)dotrace_free_after) не срабатывает
 	стало быть нет возможности заморозить asan внутри cfree() и, пометив память как освобождённую,
 	произойдёт масса false positive внутри libc.so.
+3)  не учитывается realloc()
 */
