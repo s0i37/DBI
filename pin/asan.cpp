@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <iostream>
 
-#define VERSION "0.35"
+#define VERSION "0.39"
 
 #define ALLOCATE 1
 #define FREE !ALLOCATE
@@ -48,6 +48,7 @@ struct Module
 map < int, deque<ADDRINT> > _calls;
 map < int, bool > stop_tracing;
 ADDRINT allocate_ptr;
+ADDRINT reallocate_ptr;
 ADDRINT free_ptr;
 unsigned int malloc_size = 0;
 ADDRINT malloc_call_addr = 0;
@@ -80,6 +81,29 @@ ADDRINT get_module_base(ADDRINT addr)
 	return 0;
 }
 
+void dump_registers(CONTEXT *ctx)
+{
+    ADDRINT rax = PIN_GetContextReg(ctx, REG_GAX);
+    ADDRINT rcx = PIN_GetContextReg(ctx, REG_GCX);
+    ADDRINT rdx = PIN_GetContextReg(ctx, REG_GDX);
+    ADDRINT rbx = PIN_GetContextReg(ctx, REG_GBX);
+    ADDRINT rsp = PIN_GetContextReg(ctx, REG_STACK_PTR);
+    ADDRINT rbp = PIN_GetContextReg(ctx, REG_GBP);
+    ADDRINT rsi = PIN_GetContextReg(ctx, REG_GSI);
+    ADDRINT rdi = PIN_GetContextReg(ctx, REG_GDI);
+    ADDRINT rip = PIN_GetContextReg(ctx, REG_RIP);
+    fprintf(f, "\tGAX: " HEX_FMT "\n"
+        "\tGCX: " HEX_FMT "\n"
+        "\tGDX: " HEX_FMT "\n"
+        "\tGBX: " HEX_FMT "\n"
+        "\tGSP: " HEX_FMT "\n"
+        "\tGBP: " HEX_FMT "\n"
+        "\tGSI: " HEX_FMT "\n"
+        "\tGDI: " HEX_FMT "\n"
+        "\tRIP: " HEX_FMT "\n"
+        , rax, rcx, rdx, rbx, rsp, rbp, rsi, rdi, rip);
+}
+
 void print_callstack(UINT32 threadid)
 {
 	if( _calls.count(threadid) == 0 )
@@ -87,6 +111,16 @@ void print_callstack(UINT32 threadid)
 	deque<ADDRINT>::iterator it = _calls[threadid].end();
 	while( it-- != _calls[threadid].begin() )
 		fprintf( f, "\t+" HEX_FMT " %s\n", *it - get_module_base(*it), get_module_name(*it).c_str() );
+}
+
+void print_callstack_row(UINT32 threadid)
+{
+	if( _calls.count(threadid) == 0 )
+		return;
+	deque<ADDRINT>::iterator it = _calls[threadid].end();
+	while( it-- != _calls[threadid].begin() )
+		fprintf( f, HEX_FMT "<-", *it );
+	fprintf(f, "\n");
 }
 
 void dotrace_CALL(UINT32 threadid, ADDRINT eip)
@@ -113,7 +147,7 @@ void dotrace_allocate_before(UINT32 threadid, ADDRINT eip, unsigned int size)
 	malloc_call_addr = eip;
 	if(size == 0)
 	{
-		fprintf(f, "[!] allocate(NULL) in +" HEX_FMT " %s\n", eip - get_module_base(eip), get_module_name(eip).c_str());
+		fprintf(f, "[!] allocate(NULL) in ");
 		print_callstack(threadid);
 		fflush(f);
 	}
@@ -125,8 +159,8 @@ void dotrace_allocate_after(UINT32 threadid, ADDRINT eip, ADDRINT addr)
 	stop_tracing[threadid] = false;
 	if( addr == 0 )
 	{
-		fprintf(f, "[+] allocate(0x%x) = 0 in +" HEX_FMT " %s\n", malloc_size, malloc_call_addr - get_module_base(malloc_call_addr), get_module_name(eip).c_str());
-		print_callstack(threadid);
+		fprintf(f, "[+] allocate(0x%x) = 0 in ", malloc_size);
+		print_callstack_row(threadid);
 		fflush(f);
 		return;
 	}
@@ -136,12 +170,14 @@ void dotrace_allocate_after(UINT32 threadid, ADDRINT eip, ADDRINT addr)
 		{
 			if( it->status == ALLOCATE )
 			{
-				fprintf(f, "[+] reallocate(0x%x) usable memory " HEX_FMT " in " HEX_FMT "\n", malloc_size, addr, malloc_call_addr);
+				fprintf(f, "[+] reallocate(0x%x) usable memory " HEX_FMT " in ", malloc_size, addr);
+				print_callstack_row(threadid);
 				fflush(f);
 			}
 			else
 			{
-				fprintf(f, "[+] allocate(0x%x) old memory " HEX_FMT " in " HEX_FMT "\n", malloc_size, addr, malloc_call_addr);
+				fprintf(f, "[+] allocate(0x%x) old memory " HEX_FMT " in ", malloc_size, addr);
+				print_callstack_row(threadid);
 				fflush(f);
 			}
 			it->size = malloc_size;
@@ -156,7 +192,8 @@ void dotrace_allocate_after(UINT32 threadid, ADDRINT eip, ADDRINT addr)
 	heap.status = ALLOCATE;
 	heap.check = !CHECKED;
 	heap_list.push_front(heap);
-	fprintf(f, "[+] allocate(0x%x) new memory " HEX_FMT " in " HEX_FMT "\n", malloc_size, addr, malloc_call_addr);
+	fprintf(f, "[+] allocate(0x%x) new memory " HEX_FMT " in ", malloc_size, addr);
+	print_callstack_row(threadid);
 	fflush(f);
 }
 
@@ -164,7 +201,8 @@ void dotrace_free_before(UINT32 threadid, ADDRINT eip, ADDRINT addr)
 {
 	//fprintf(f, "dotrace_free_before %d\n", threadid);
 	//stop_tracing[threadid] = true;
-	fprintf(f, "[-] free(" HEX_FMT ") in +" HEX_FMT " %s\n", addr, eip - get_module_base(eip), get_module_name(eip).c_str());
+	fprintf(f, "[-] free(" HEX_FMT ") in ", addr);
+	print_callstack_row(threadid);
 	list <struct Heap>::iterator it;
 	for( it = heap_list.begin(); it != heap_list.end(); it++ )
 		if( it->base == addr )
@@ -213,40 +251,42 @@ void dotrace_use_mem(UINT32 threadid, ADDRINT eip, ADDRINT addr, CONTEXT *ctx)
 		return;
 
 	list <struct Heap>::iterator it;
-	for( it = heap_list.begin(); it != heap_list.end(); it++ )
-		if( (addr >= it->base - CHUNK_SIZE && addr < it->base) || (addr > it->base + it->size && addr <= it->base + it->size + CHUNK_SIZE) )
-		{
-			fprintf(f, "[!] OOB heap " HEX_FMT " (chunk " HEX_FMT ") in +" HEX_FMT " %s\n", addr, it->base, eip - get_module_base(eip), get_module_name(eip).c_str());
-			print_callstack(threadid);
-			fflush(f);
-		}
-
-	for( it = heap_list.begin(); it != heap_list.end(); it++ )
-		if( addr >= it->base && addr <= it->base + it->size )
-		{
-			if( it->status == FREE )
+	if(eip >= low_boundary && eip <= high_boundary)
+	{
+		for( it = heap_list.begin(); it != heap_list.end(); it++ )
+			if( (addr >= it->base - CHUNK_SIZE && addr < it->base) || (addr > it->base + it->size && addr <= it->base + it->size + CHUNK_SIZE) )
 			{
-				if(eip >= low_boundary && eip <= high_boundary)
+				fprintf(f, "[!] OOB heap " HEX_FMT " (chunk " HEX_FMT ") in +" HEX_FMT " %s\n", 
+					addr, 
+					it->base, 
+					eip - get_module_base(eip), 
+					get_module_name(eip).c_str()
+				);
+				print_callstack(threadid);
+				fflush(f);
+			}
+
+		for( it = heap_list.begin(); it != heap_list.end(); it++ )
+			if( addr >= it->base && addr <= it->base + it->size )
+			{
+				if( it->status == FREE )
 				{
 					fprintf(f, "[!] UAF " HEX_FMT " in +" HEX_FMT " %s\n", addr, eip - get_module_base(eip), get_module_name(eip).c_str());
 					print_callstack(threadid);
 					fflush(f);
 				}
-			}
-			else if( it->check != CHECKED )
-			{
-				if(eip >= low_boundary && eip <= high_boundary)
+				else if( it->check != CHECKED )
 				{
 					fprintf(f, "[!] UWC " HEX_FMT " in +" HEX_FMT " %s\n", addr, eip - get_module_base(eip), get_module_name(eip).c_str());
 					print_callstack(threadid);
 					fflush(f);
 				}
+				
+				/* don't remind about this again */
+				it->check = CHECKED;
+				break;
 			}
-			
-			/* don't remind about this again */
-			it->check = CHECKED;
-			break;
-		}
+	}
 }
 
 
@@ -382,6 +422,7 @@ void img_instrument(IMG img, VOID * v)
 			return;
 
 		RTN allocate = RTN_FindByName(img, "malloc");	/* void *malloc(size_t size); 	*/
+		RTN reallocate = RTN_FindByName(img, "realloc"); /* void *realloc(void *ptr, size_t size); */
 		RTN _free = RTN_FindByName(img, "free");		/* void free(void *ptr); 		*/
 		/* PIN всё равно подставляет __libc_malloc() и cfree() - это более низкоуровневые вызовы*/
 
@@ -394,6 +435,16 @@ void img_instrument(IMG img, VOID * v)
 			fprintf(f, "[+] function %s %s\n", IMG_Name(img).c_str(), RTN_Name(allocate).c_str() );
 			fflush(f);
 			RTN_Close(allocate);
+		}
+		if( reallocate.is_valid()  )
+		{
+			reallocate_ptr = RTN_Address(reallocate);
+			RTN_Open(reallocate);
+			RTN_InsertCall(reallocate, IPOINT_BEFORE, (AFUNPTR)dotrace_allocate_before, IARG_UINT32, PIN_ThreadId(), IARG_INST_PTR, IARG_FUNCARG_ENTRYPOINT_VALUE, 1, IARG_END);
+			RTN_InsertCall(reallocate, IPOINT_AFTER, (AFUNPTR)dotrace_allocate_after, IARG_UINT32, PIN_ThreadId(), IARG_INST_PTR, IARG_FUNCRET_EXITPOINT_VALUE, IARG_END);
+			fprintf(f, "[+] function %s %s\n", IMG_Name(img).c_str(), RTN_Name(reallocate).c_str() );
+			fflush(f);
+			RTN_Close(reallocate);
 		}
 		if( _free.is_valid()  )
 		{
@@ -445,7 +496,11 @@ void context_change(THREADID tid, CONTEXT_CHANGE_REASON reason, const CONTEXT *c
     {
         fprintf(f, "[!] EXCEPTION 0x%08x\n", info);
         if(info == 0xc0000005)
+        {
             fprintf(f, "[!] ACCESS VIOLATION")
+        	dump_registers(ctx);
+        	print_callstack(tid);
+        }
         fflush(f);
     }
 }
@@ -453,6 +508,8 @@ void context_change(THREADID tid, CONTEXT_CHANGE_REASON reason, const CONTEXT *c
 bool on_crash(unsigned int threadId, int sig, CONTEXT* ctx, bool hasHandler, const EXCEPTION_INFO* pExceptInfo, void* v)
 {
   fprintf(f, "[!] SIGSEGV\n");
+  dump_registers(ctx);
+  print_callstack(threadId);
   fflush(f);
   return true;
 }
