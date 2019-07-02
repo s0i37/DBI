@@ -18,3 +18,5 @@ Interceptor.attach( new NativeFunction( ptr(0x401000), 'int', ['pointer','int'] 
 )
 
 Thread.backtrace(this.context, Backtracer.ACCURATE).map(DebugSymbol.fromAddress).join("\n") 	// backtrace
+
+Instruction.parse(ptr(0x00055cd8aedd000)).toString() 	// disas
