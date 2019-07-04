@@ -3,7 +3,7 @@
 #include <list>
 #include <iostream>
 
-#define VERSION "0.20"
+#define VERSION "0.21"
 #define MAP_SIZE    (1 << 16)
 
 #if defined(__i386__) || defined(_WIN32)
@@ -28,7 +28,9 @@ namespace windows {
 
 CONTEXT snapshot;
 BOOL is_saved_snapshot = FALSE;
+BOOL in_fuzz_area = FALSE;
 BOOL was_crash = FALSE;
+BOOL is_loop = FALSE;
 ADDRINT min_addr = 0;
 ADDRINT max_addr = 0;
 ADDRINT entry_addr = -1;
@@ -68,6 +70,7 @@ KNOB<ADDRINT> Knob_entry(KNOB_MODE_WRITEONCE, "pintool", "entry", "-1", "start a
 KNOB<ADDRINT> Knob_exit(KNOB_MODE_WRITEONCE, "pintool", "exit", "-1", "stop address for fuzzing");
 KNOB<string> Knob_coverage_module(KNOB_MODE_WRITEONCE, "pintool", "coverage_module", "", "module for coverage");
 KNOB<string> Knob_shm_str(KNOB_MODE_WRITEONCE, "pintool", "shm", "0", "coverage shared memory string");
+KNOB<BOOL> Knob_loop(KNOB_MODE_WRITEONCE,  "pintool", "loop", "0", "force loop execution flow between entry and exit points");
 
 
 
@@ -88,8 +91,8 @@ void write_mem(ADDRINT addr, ADDRINT memop)
 {
   struct memoryInput elem;
 
-  if(entry_addr == -1)
-  	return;
+  if( !(is_loop && in_fuzz_area) )
+    return;
   elem.addr = memop;
   elem.val = *(reinterpret_cast<ADDRINT*>(memop));
   memInput.push_back(elem);
@@ -116,20 +119,23 @@ void exec_instr(ADDRINT addr, CONTEXT * ctx)
     if(was_crash)
     {
         was_crash = false;
+        in_fuzz_area = FALSE;
         PIN_SaveContext(&snapshot, ctx);
         restore_memory();
         PIN_ExecuteAt(ctx);
     }
 
-	if(rva == entry_addr)
+	if(rva == entry_addr && in_fuzz_area == FALSE)
 	{
+        in_fuzz_area = TRUE;
 		PIN_SaveContext(ctx, &snapshot);
 		is_saved_snapshot = TRUE;
         if (Knob_debug)
 		  printf("[*] fuzz iteration " INT_FMT " started\n", ++fuzz_iters);
 	}
-	else if(rva == exit_addr)
+	else if(rva == exit_addr && in_fuzz_area == TRUE)
 	{
+        in_fuzz_area = FALSE;
         if (Knob_debug)
           printf("[*] fuzz iteration " INT_FMT " finished\n", fuzz_iters);
         windows::write_to_pipe("K");
@@ -153,11 +159,14 @@ VOID track_branch(ADDRINT cur_addr)
           cur_addr, (UINT32)(cur_addr - min_addr), (UINT16)((cur_id ^ last_id) % MAP_SIZE) );
     }
 
-    if (bitmap_shm != 0){
-        bitmap_shm[((cur_id ^ last_id) % MAP_SIZE)]++;
-    }
-    else {
-        bitmap[((cur_id ^ last_id) % MAP_SIZE)]++;
+    if(in_fuzz_area)
+    {
+        if (bitmap_shm != 0){
+            bitmap_shm[((cur_id ^ last_id) % MAP_SIZE)]++;
+        }
+        else {
+            bitmap[((cur_id ^ last_id) % MAP_SIZE)]++;
+        }
     }
     last_id = cur_id;
 }
@@ -257,7 +266,7 @@ void dump_registers(CONTEXT *ctx)
     ADDRINT rbp = PIN_GetContextReg(ctx, REG_GBP);
     ADDRINT rsi = PIN_GetContextReg(ctx, REG_GSI);
     ADDRINT rdi = PIN_GetContextReg(ctx, REG_GDI);
-    ADDRINT rip = PIN_GetContextReg(ctx, REG_RIP);
+    ADDRINT rip = PIN_GetContextReg(ctx, REG_IP);
     printf("RAX: " HEX_FMT "\n"
         "RCX: " HEX_FMT "\n"
         "RDX: " HEX_FMT "\n"
@@ -309,7 +318,7 @@ VOID entry_point(VOID *ptr)
             if ( SEC_IsExecutable(sec) /*&& SEC_Name(sec) == ".text"*/)
             {
                 ADDRINT sec_addr = SEC_Address(sec);
-                UINT64 sec_size = SEC_Size(sec);
+                UINT32 sec_size = SEC_Size(sec);
                 
                 if(Knob_debug)
                     printf("[*] section: %s, addr: " HEX_FMT ", size: " INT_FMT "\n", SEC_Name(sec).c_str(), sec_addr, sec_size);
@@ -362,6 +371,7 @@ INT32 Usage()
     std::cerr << "   -exit 0xADDR --  stop address for fuzzing" << std::endl;
     std::cerr << "   -coverage_module module.dll --  module for coverage" << std::endl;
     std::cerr << "   -shm afl_shm_12345 --  coverage shared memory string" << std::endl;
+    std::cerr << "   -loop --  force loop execution flow between entry and exit points" << std::endl;
     return -1;
 }
 
@@ -376,6 +386,7 @@ int main(int argc, char ** argv)
     exit_addr = Knob_exit.Value();
     target_module = Knob_target_module.Value();
     coverage_module = Knob_coverage_module.Value();
+    is_loop = Knob_loop;
 
     if(!windows::setup_pipe())
     {

@@ -3,7 +3,7 @@
 #include <list>
 #include <iostream>
 
-#define VERSION "0.20"
+#define VERSION "0.21"
 #define FUZZ_DATA_SIZE 0x1000
 #define MAP_SIZE    (1 << 16)
 
@@ -383,7 +383,7 @@ void dump_registers(CONTEXT *ctx)
     ADDRINT rbp = PIN_GetContextReg(ctx, REG_GBP);
     ADDRINT rsi = PIN_GetContextReg(ctx, REG_GSI);
     ADDRINT rdi = PIN_GetContextReg(ctx, REG_GDI);
-    ADDRINT rip = PIN_GetContextReg(ctx, REG_RIP);
+    ADDRINT rip = PIN_GetContextReg(ctx, REG_IP);
     printf("RAX: " HEX_FMT "\n"
         "RCX: " HEX_FMT "\n"
         "RDX: " HEX_FMT "\n"
@@ -441,7 +441,7 @@ VOID entry_point(VOID *ptr)
             if ( SEC_IsExecutable(sec) /*&& SEC_Name(sec) == ".text"*/)
             {
                 ADDRINT sec_addr = SEC_Address(sec);
-                UINT64 sec_size = SEC_Size(sec);
+                UINT32 sec_size = SEC_Size(sec);
                 
                 if(Knob_debug)
                     printf("[*] section: %s, addr: " HEX_FMT ", size: " INT_FMT "\n", SEC_Name(sec).c_str(), sec_addr, sec_size);
