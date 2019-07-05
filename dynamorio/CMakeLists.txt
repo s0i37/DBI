@@ -29,5 +29,7 @@ function (add_sample_client name source_file_list extension_list)
 
 endfunction (add_sample_client)
 
-add_sample_client(sample       "sample.c"         "drmgr;drwrap")
+configure_DynamoRIO_global(OFF ON)
 
+add_sample_client(sample       "sample.c"         "drmgr;drwrap")
+add_sample_client(icount       "icount.c"         "drmgr")
