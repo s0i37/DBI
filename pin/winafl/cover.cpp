@@ -3,7 +3,7 @@
 #include <list>
 #include <iostream>
 
-#define VERSION "0.21"
+#define VERSION "0.22"
 #define MAP_SIZE    (1 << 16)
 
 #if defined(__i386__) || defined(_WIN32)
@@ -43,6 +43,7 @@ unsigned char bitmap[MAP_SIZE];
 const char *shm_str;
 uint8_t *bitmap_shm = 0;
 ADDRINT last_id = 0;
+UINT32 worker_thread_id = 0;
 
 long unsigned int fuzz_iters = 0;
 struct FuzzData
@@ -82,7 +83,7 @@ void restore_memory(void)
   {
     *(reinterpret_cast<ADDRINT*>(i->addr)) = i->val;
     if (Knob_debug)
-        printf("[*] restore " HEX_FMT " <- " HEX_FMT "\n", i->addr, i->val);
+        fprintf(f,"[*] restore " HEX_FMT " <- " HEX_FMT "\n", i->addr, i->val);
   }
   memInput.clear();
 }
@@ -97,7 +98,7 @@ void write_mem(ADDRINT addr, ADDRINT memop)
   elem.val = *(reinterpret_cast<ADDRINT*>(memop));
   memInput.push_back(elem);
   if (Knob_debug)
-    printf("[*] memory write " HEX_FMT ": " HEX_FMT "\n", elem.addr, elem.val);
+    fprintf(f,"[*] memory write " HEX_FMT ": " HEX_FMT "\n", elem.addr, elem.val);
 }
 
 inline ADDRINT valid_addr(ADDRINT addr)
@@ -109,7 +110,7 @@ inline ADDRINT valid_addr(ADDRINT addr)
 }
 
 
-void exec_instr(ADDRINT addr, CONTEXT * ctx)
+void exec_instr(ADDRINT addr, UINT32 thread_id, CONTEXT * ctx)
 {
 	//if( addr >= 0x401000 && addr <= 0x401024 )
 	//printf(HEX_FMT "\n", addr - min_addr);
@@ -127,17 +128,18 @@ void exec_instr(ADDRINT addr, CONTEXT * ctx)
 
 	if(rva == entry_addr && in_fuzz_area == FALSE)
 	{
+        worker_thread_id = thread_id;
         in_fuzz_area = TRUE;
 		PIN_SaveContext(ctx, &snapshot);
 		is_saved_snapshot = TRUE;
         if (Knob_debug)
-		  printf("[*] fuzz iteration " INT_FMT " started\n", ++fuzz_iters);
+		  fprintf(f, "[*] fuzz iteration " INT_FMT " started [%d]\n", ++fuzz_iters, worker_thread_id);
 	}
 	else if(rva == exit_addr && in_fuzz_area == TRUE)
 	{
         in_fuzz_area = FALSE;
         if (Knob_debug)
-          printf("[*] fuzz iteration " INT_FMT " finished\n", fuzz_iters);
+          fprintf(f, "[*] fuzz iteration " INT_FMT " finished\n", fuzz_iters);
         windows::write_to_pipe("K");
         if(entry_addr != -1)
         {
@@ -150,17 +152,17 @@ void exec_instr(ADDRINT addr, CONTEXT * ctx)
 	}
 }
 
-VOID track_branch(ADDRINT cur_addr)
+VOID track_branch(ADDRINT cur_addr, UINT32 thread_id)
 {
     ADDRINT cur_id = cur_addr - min_addr;
 
-    if (Knob_debug) {
-        printf( "[+] branch: " HEX_FMT ", rel_addr: 0x%08x, index: 0x%04x\n",
-          cur_addr, (UINT32)(cur_addr - min_addr), (UINT16)((cur_id ^ last_id) % MAP_SIZE) );
-    }
-
-    if(in_fuzz_area)
+    if(in_fuzz_area && worker_thread_id == thread_id)
     {
+        if (Knob_debug)
+        {
+            fprintf(f, "[+] branch: " HEX_FMT ", rel_addr: 0x%08x, index: 0x%04x\n",
+                cur_addr, (UINT32)(cur_addr - min_addr), (UINT16)((cur_id ^ last_id) % MAP_SIZE) );
+        }
         if (bitmap_shm != 0){
             bitmap_shm[((cur_id ^ last_id) % MAP_SIZE)]++;
         }
@@ -176,6 +178,7 @@ void ins_instrument(INS ins, VOID *v)
 {
 	INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)exec_instr,
 					IARG_ADDRINT, INS_Address(ins),
+                    IARG_UINT32, PIN_ThreadId(),
 					IARG_CONTEXT,
 					IARG_END);
 
@@ -201,6 +204,7 @@ VOID trace_intrument(TRACE trace, VOID *v)
                     {
                         INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)track_branch,
                             IARG_INST_PTR,
+                            IARG_UINT32, PIN_ThreadId(),
                             IARG_END);
                     }
                 }
@@ -267,7 +271,7 @@ void dump_registers(CONTEXT *ctx)
     ADDRINT rsi = PIN_GetContextReg(ctx, REG_GSI);
     ADDRINT rdi = PIN_GetContextReg(ctx, REG_GDI);
     ADDRINT rip = PIN_GetContextReg(ctx, REG_IP);
-    printf("RAX: " HEX_FMT "\n"
+    fprintf(f,"RAX: " HEX_FMT "\n"
         "RCX: " HEX_FMT "\n"
         "RDX: " HEX_FMT "\n"
         "RBX: " HEX_FMT "\n"
@@ -285,7 +289,7 @@ void context_change(THREADID tid, CONTEXT_CHANGE_REASON reason, const CONTEXT *c
     {
         if (Knob_debug)
         {
-            printf("[!] exception " HEX_FMT "\n", info);
+            fprintf(f,"[!] exception " HEX_FMT "\n", info);
             dump_registers(ctxtTo);
         }
         if(info == 0xc0000005)
@@ -299,7 +303,7 @@ void context_change(THREADID tid, CONTEXT_CHANGE_REASON reason, const CONTEXT *c
 EXCEPT_HANDLING_RESULT internal_exception(THREADID tid, EXCEPTION_INFO *pExceptInfo, PHYSICAL_CONTEXT *pPhysCtxt, VOID *v)
 {
   if (Knob_debug)
-     printf( "[!] internal_exception in " HEX_FMT "\n", PIN_GetPhysicalContextReg(pPhysCtxt, REG_INST_PTR) );
+     fprintf(f, "[!] internal_exception in " HEX_FMT "\n", PIN_GetPhysicalContextReg(pPhysCtxt, REG_INST_PTR) );
   return EHR_HANDLED;
 }
 
@@ -312,16 +316,16 @@ VOID entry_point(VOID *ptr)
         if( target_module != "" && strcasestr( IMG_Name(img).c_str(), target_module.c_str() ) == 0 )
             continue;
         if(Knob_debug)
-            printf("[*] module %s %lx " HEX_FMT "\n", IMG_Name(img).c_str(), IMG_LowAddress(img), IMG_HighAddress(img));
+           fprintf(f,"[*] module %s %lx " HEX_FMT "\n", IMG_Name(img).c_str(), IMG_LowAddress(img), IMG_HighAddress(img));
         for(sec= IMG_SecHead(img); SEC_Valid(sec); sec = SEC_Next(sec))
         {
-            if ( SEC_IsExecutable(sec) /*&& SEC_Name(sec) == ".text"*/)
+            if ( SEC_IsExecutable(sec) && SEC_Name(sec) == ".text")
             {
                 ADDRINT sec_addr = SEC_Address(sec);
                 UINT32 sec_size = SEC_Size(sec);
                 
                 if(Knob_debug)
-                    printf("[*] section: %s, addr: " HEX_FMT ", size: " INT_FMT "\n", SEC_Name(sec).c_str(), sec_addr, sec_size);
+                    fprintf(f,"[*] section: %s, addr: " HEX_FMT ", size: " INT_FMT "\n", SEC_Name(sec).c_str(), sec_addr, sec_size);
 
                 if(sec_addr != 0)
                 {
@@ -345,22 +349,22 @@ VOID entry_point(VOID *ptr)
     }
     if(Knob_debug)
     {
-        printf("[+] min_addr: " HEX_FMT "\n", min_addr);
-        printf("[+] max_addr: " HEX_FMT "\n", max_addr);
+        fprintf(f,"[+] min_addr: " HEX_FMT "\n", min_addr);
+        fprintf(f,"[+] max_addr: " HEX_FMT "\n", max_addr);
         if(entry_addr != -1)
-            printf("[+] entry_addr: " HEX_FMT "\n", min_addr + entry_addr);
-        printf("[+] exit_addr: " HEX_FMT "\n", min_addr + exit_addr);
+            fprintf(f,"[+] entry_addr: " HEX_FMT "\n", min_addr + entry_addr);
+        fprintf(f,"[+] exit_addr: " HEX_FMT "\n", min_addr + exit_addr);
     }   
 }
 
 void fini(INT32 code, VOID *v)
 {
     if (Knob_debug)
-	   printf("[*] end\n");
+	   fprintf(f, "[*] end\n");
     windows::DisconnectNamedPipe(windows::pipe_sync);
     windows::CloseHandle(windows::pipe_sync);
-	//fflush(f);
-	//fclose(f);
+	fflush(f);
+	fclose(f);
 }
 
 INT32 Usage()
@@ -377,7 +381,7 @@ INT32 Usage()
 
 int main(int argc, char ** argv)
 {
-	//f = fopen("fuzz.log", "w");
+	f = fopen("fuzz.log", "w");
 	if(PIN_Init(argc, argv))
         return Usage();
 
