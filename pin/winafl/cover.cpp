@@ -3,7 +3,7 @@
 #include <list>
 #include <iostream>
 
-#define VERSION "0.22"
+#define VERSION "0.23"
 #define MAP_SIZE    (1 << 16)
 
 #if defined(__i386__) || defined(_WIN32)
@@ -117,7 +117,7 @@ void exec_instr(ADDRINT addr, UINT32 thread_id, CONTEXT * ctx)
     char command;
     ADDRINT rva = addr - min_addr;
 
-    if(was_crash)
+    if(was_crash && is_loop)
     {
         was_crash = false;
         in_fuzz_area = FALSE;
@@ -130,8 +130,11 @@ void exec_instr(ADDRINT addr, UINT32 thread_id, CONTEXT * ctx)
 	{
         worker_thread_id = thread_id;
         in_fuzz_area = TRUE;
-		PIN_SaveContext(ctx, &snapshot);
-		is_saved_snapshot = TRUE;
+        if(is_loop)
+        {
+		  PIN_SaveContext(ctx, &snapshot);
+		  is_saved_snapshot = TRUE;
+        }
         if (Knob_debug)
 		  fprintf(f, "[*] fuzz iteration " INT_FMT " started [%d]\n", ++fuzz_iters, worker_thread_id);
 	}
@@ -141,7 +144,7 @@ void exec_instr(ADDRINT addr, UINT32 thread_id, CONTEXT * ctx)
         if (Knob_debug)
           fprintf(f, "[*] fuzz iteration " INT_FMT " finished\n", fuzz_iters);
         windows::write_to_pipe("K");
-        if(entry_addr != -1)
+        if(is_loop)
         {
 		  if(is_saved_snapshot)
 		      PIN_SaveContext(&snapshot, ctx);
@@ -354,7 +357,8 @@ VOID entry_point(VOID *ptr)
         if(entry_addr != -1)
             fprintf(f,"[+] entry_addr: " HEX_FMT "\n", min_addr + entry_addr);
         fprintf(f,"[+] exit_addr: " HEX_FMT "\n", min_addr + exit_addr);
-    }   
+    }
+    fflush(f);
 }
 
 void fini(INT32 code, VOID *v)
