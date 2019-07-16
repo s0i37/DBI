@@ -91,7 +91,7 @@ void dump_registers(CONTEXT *ctx)
     ADDRINT rbp = PIN_GetContextReg(ctx, REG_GBP);
     ADDRINT rsi = PIN_GetContextReg(ctx, REG_GSI);
     ADDRINT rdi = PIN_GetContextReg(ctx, REG_GDI);
-    ADDRINT rip = PIN_GetContextReg(ctx, REG_RIP);
+    ADDRINT rip = PIN_GetContextReg(ctx, REG_EIP);
     fprintf(f, "\tGAX: " HEX_FMT "\n"
         "\tGCX: " HEX_FMT "\n"
         "\tGDX: " HEX_FMT "\n"

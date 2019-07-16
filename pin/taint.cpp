@@ -3,7 +3,7 @@
 #include <list>
 #include <map>
 
-#define VERSION "0.40"
+#define VERSION "0.43"
 #define MAX_TAINT_DATA 0x1000
 
 #if defined(__i386__) || defined(_WIN32)
@@ -35,6 +35,9 @@ ADDRINT high_boundary;
 FILE *f, *taint_data_file;
 unsigned char *taint_data;
 UINT32 taint_data_len;
+UINT32 taint_offset;
+UINT32 taint_size;
+
 unsigned long int ins_count = 0;
 
 KNOB<BOOL> Knob_debug(KNOB_MODE_WRITEONCE,  "pintool", "debug", "0", "Enable debug mode");
@@ -43,6 +46,8 @@ KNOB<ADDRINT> Knob_from(KNOB_MODE_WRITEONCE, "pintool", "from", "0", "start addr
 KNOB<ADDRINT> Knob_to(KNOB_MODE_WRITEONCE, "pintool", "to", "0", "stop address (absolute) for taint");
 KNOB<string> Knob_module(KNOB_MODE_WRITEONCE,  "pintool", "module", "", "taint this module");
 KNOB<string> Knob_taint(KNOB_MODE_WRITEONCE,  "pintool", "taint", "", "taint this data");
+KNOB<UINT32> Knob_offset(KNOB_MODE_WRITEONCE,  "pintool", "offset", "0", "from offset (subdata)");
+KNOB<UINT32> Knob_size(KNOB_MODE_WRITEONCE,  "pintool", "size", "0", "size bytes (subdata)");
 
 
 void add_mem_taint(ADDRINT addr)
@@ -507,7 +512,13 @@ void find_tainted_data(ADDRINT mem)
 		if(i%0x10 == 0)
 			fprintf(f, "\n[+] founded tainted data " HEX_FMT ":\t", mem+i);
 		fprintf( f, "%02X ", *(unsigned char *)(mem + i) );
-		add_mem_taint(mem + i);
+		if(taint_size)
+		{
+			if(i >= taint_offset && i < taint_offset+taint_size)
+				add_mem_taint(mem + i);
+		}
+		else
+			add_mem_taint(mem + i);
 		tainted_offsets[mem+i] = i;
 	}
 	fprintf(f, "\n");
@@ -515,9 +526,9 @@ void find_tainted_data(ADDRINT mem)
 }
 
 unsigned int offset = -1; /* индекс в tainted_data */
-void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, int rregs_count, REG * rregs, int wregs_count, REG * wregs, int mems_count, int memop0_type, ADDRINT memop0, int memop1_type, ADDRINT memop1)
+void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rregs_count, REG * rregs, UINT32 wregs_count, REG * wregs, UINT32 mems_count, UINT32 memop0_type, ADDRINT memop0, UINT32 memop1_type, ADDRINT memop1, UINT32 size)
 {
-	int i, j, is_spread = 0;
+	UINT32 i, j, is_spread = 0;
 	list <ADDRINT>::iterator addr_it;
 	ADDRINT taint_memory_read = 0, taint_memory_write = 0, taint_memory_ptr = 0;
 	ADDRINT register_value = 0;
@@ -576,13 +587,15 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, int rregs
 		{
 			if(memop0_type == 2)
 			{
-				add_mem_taint( memop0 ); /* пометить записываемый 1 операнд памяти */
+				for(i = 0; i < size; i++)
+					add_mem_taint( memop0+i ); /* пометить записываемый 1 операнд памяти */
 				taint_memory_write = memop0;
 				tainted_offsets[taint_memory_write] = offset;
 			}
 			if(memop1_type == 2)
 			{
-				add_mem_taint( memop1 ); /* пометить записываемый 2 операнд памяти */
+				for(i = 0; i < size; i++)
+					add_mem_taint( memop1+1 ); /* пометить записываемый 2 операнд памяти */
 				taint_memory_write = memop1;
 				tainted_offsets[taint_memory_write] = offset;
 			}
@@ -617,18 +630,47 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, int rregs
 			fprintf(f, "%s " HEX_FMT ":%u:%lu:", get_module_name(eip), eip - get_module_base(eip), threadid, ins_count);
 			if(taint_memory_read)
 			{
-				fprintf( f, " *" HEX_FMT " -> %08lX", taint_memory_read, *((unsigned long int *)taint_memory_read) );
+				switch(size)
+				{
+					case 8:
+						fprintf( f, " *" HEX_FMT " -> %016lX", taint_memory_read, *((unsigned long int *)taint_memory_read) );
+						break;
+					case 4:
+						fprintf( f, " *" HEX_FMT " -> %08X", taint_memory_read, *((unsigned int *)taint_memory_read) );
+						break;
+					case 2:
+						fprintf( f, " *" HEX_FMT " -> %04X", taint_memory_read, *((unsigned short *)taint_memory_read) );
+						break;
+					case 1:
+						fprintf( f, " *" HEX_FMT " -> %02X", taint_memory_read, *((unsigned char *)taint_memory_read) );
+						break;
+				}
 				telescope( *((int *)taint_memory_read), 1 );
 			}
 			if(taint_memory_write)
 				fprintf( f, " *" HEX_FMT " <- ;", taint_memory_write );
 			if(taint_memory_ptr)
 			{
-				fprintf( f, " %s:*" HEX_FMT " = %08lX", get_reg_name(reg).c_str(), taint_memory_ptr, *((unsigned long int *)taint_memory_ptr) );
+				switch(size)
+				{
+					case 8:
+						fprintf( f, " %s:*" HEX_FMT " = %08lX", get_reg_name(reg).c_str(), taint_memory_ptr, *((unsigned long int *)taint_memory_ptr) );
+						break;
+					case 4:
+						fprintf( f, " %s:*" HEX_FMT " = %08X", get_reg_name(reg).c_str(), taint_memory_ptr, *((unsigned int *)taint_memory_ptr) );
+						break;
+					case 2:
+						fprintf( f, " %s:*" HEX_FMT " = %04X", get_reg_name(reg).c_str(), taint_memory_ptr, *((unsigned short *)taint_memory_ptr) );
+						break;
+					case 1:
+						fprintf( f, " %s:*" HEX_FMT " = %02X", get_reg_name(reg).c_str(), taint_memory_ptr, *((unsigned char *)taint_memory_ptr) );
+						break;
+				}
 				telescope( *((int *)taint_memory_ptr), 1 );
 			}
 			else if(reg)
 				fprintf( f, " %s=" HEX_FMT ";", get_reg_name(reg).c_str(), register_value );
+
 			fprintf(f, " [0x%x]\n", offset);
 			fflush(f);
 		}
@@ -678,6 +720,7 @@ void ins_instrument(INS ins, VOID * v)
 					IARG_UINT32, 0, 	/* mem_op0 value */
 					IARG_UINT32, 0, 	/* mem_op1 type */
 					IARG_UINT32, 0, 	/* mem_op1 value */
+					IARG_UINT32, 0,
 					IARG_END);
 					break;
 			case 1: INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR) taint,
@@ -694,6 +737,7 @@ void ins_instrument(INS ins, VOID * v)
 					IARG_MEMORYOP_EA, 0,
 					IARG_UINT32, 0,
 					IARG_UINT32, 0,
+					IARG_MEMORYREAD_SIZE,
 					IARG_END);
 					break;
 			case 2: INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR) taint,
@@ -710,6 +754,7 @@ void ins_instrument(INS ins, VOID * v)
 					IARG_MEMORYOP_EA, 0,
 					IARG_UINT32, INS_MemoryOperandIsWritten(ins, 1) ? 2 : 1,
 					IARG_MEMORYOP_EA, 1,
+					IARG_MEMORYREAD_SIZE,
 					IARG_END);
 					break;
 		}
@@ -782,6 +827,8 @@ int main(int argc, char ** argv)
 	low_boundary = Knob_from.Value();
     high_boundary = Knob_to.Value();
     need_module = Knob_module.Value();
+    taint_offset = Knob_offset.Value();
+    taint_size = Knob_size.Value();
 
     taint_data_filename = Knob_taint.Value().c_str();
     taint_data_file = fopen(taint_data_filename, "rb");
