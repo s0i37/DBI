@@ -20,3 +20,32 @@ Interceptor.attach( new NativeFunction( ptr(0x401000), 'int', ['pointer','int'] 
 Thread.backtrace(this.context, Backtracer.ACCURATE).map(DebugSymbol.fromAddress).join("\n") 	// backtrace
 
 Instruction.parse(ptr(0x00055cd8aedd000)).toString() 	// disas
+
+
+/* размер всей виртуальной памяти */
+mem=0
+Process.enumerateRangesSync('').forEach(function(page) { mem+=page["size"] })
+
+/* exception handling */
+function onExc(v) {
+	console.log("[*] exception: " + v["type"] + " " +
+		" - " + v["memory"]["operation"] + " " + v["memory"]["address"] +
+		" in RIP=" + v["context"]["pc"] + " RSP=" + v["context"]["sp"])
+	return false // pass to the application
+}
+Process.setExceptionHandler(onExc)
+
+
+
+/*
+this = {
+	returnAddress:
+	threadId:
+	depth:
+	context: {
+		eax:,
+		ecx:,
+		...
+	}
+}
+*/

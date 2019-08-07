@@ -8,16 +8,3 @@
 		log("malloc(" + state.size + ") -> " + retval + " from " + this.returnAddress)
 	}
 }
-
-/*
-this = {
-	returnAddress:
-	threadId:
-	depth:
-	context: {
-		eax:,
-		ecx:,
-		...
-	}
-}
-*/
