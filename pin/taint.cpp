@@ -3,15 +3,17 @@
 #include <list>
 #include <map>
 
-#define VERSION "0.43"
+#define VERSION "0.45"
 #define MAX_TAINT_DATA 0x1000
 
 #if defined(__i386__) || defined(_WIN32)
 	#define HEX_FMT "0x%08x"
+	#define HEX_FMT2 "%08X"
 	#define INT_FMT "%u"
 	#define X32 1
 #elif defined(__x86_64__) || defined(_WIN64)
 	#define HEX_FMT "0x%08lx"
+	#define HEX_FMT2 "%08lX"
 	#define INT_FMT "%lu"
 	#define X64 1
 #endif
@@ -145,6 +147,70 @@ REG get_full_reg(REG reg)
 		case REG_SI:
 			return REG_GSI;
 
+	#if defined(X64)
+		case REG_R8:
+		case REG_R8D:
+    	case REG_R8W:
+    	case REG_R8B:
+    		return REG_R8;
+    #endif
+
+    #if defined(X64)
+    	case REG_R9:
+		case REG_R9D:
+    	case REG_R9W:
+    	case REG_R9B:
+    		return REG_R9;
+    #endif
+
+    #if defined(X64)
+    	case REG_R10:
+		case REG_R10D:
+    	case REG_R10W:
+    	case REG_R10B:
+    		return REG_R10;
+    #endif
+
+    #if defined(X64)
+    	case REG_R11:
+		case REG_R11D:
+    	case REG_R11W:
+    	case REG_R11B:
+    		return REG_R11;
+    #endif
+
+    #if defined(X64)
+    	case REG_R12:
+		case REG_R12D:
+    	case REG_R12W:
+    	case REG_R12B:
+    		return REG_R12;
+    #endif
+
+    #if defined(X64)
+    	case REG_R13:
+		case REG_R13D:
+    	case REG_R13W:
+    	case REG_R13B:
+    		return REG_R13;
+    #endif
+
+    #if defined(X64)
+    	case REG_R14:
+		case REG_R14D:
+    	case REG_R14W:
+    	case REG_R14B:
+    		return REG_R14;
+    #endif
+
+    #if defined(X64)
+    	case REG_R15:
+		case REG_R15D:
+    	case REG_R15W:
+    	case REG_R15B:
+    		return REG_R15;
+    #endif
+
 		default:
 			return (REG) 0;
 	}
@@ -254,6 +320,94 @@ string get_reg_name(REG reg)
 		case REG_SI:
 			return "SI";
 
+	#if defined(X64)
+		case REG_R8:
+			return "R8";
+		case REG_R8D:
+			return "R8D";
+    	case REG_R8W:
+    		return "R8W";
+    	case REG_R8B:
+    		return "R8B";
+    #endif
+
+    #if defined(X64)
+		case REG_R9:
+			return "R9";
+		case REG_R9D:
+			return "R9D";
+    	case REG_R9W:
+    		return "R9W";
+    	case REG_R9B:
+    		return "R9B";
+    #endif
+
+    #if defined(X64)
+		case REG_R10:
+			return "R10";
+		case REG_R10D:
+			return "R10D";
+    	case REG_R10W:
+    		return "R10W";
+    	case REG_R10B:
+    		return "R10B";
+    #endif
+
+    #if defined(X64)
+		case REG_R11:
+			return "R11";
+		case REG_R11D:
+			return "R11D";
+    	case REG_R11W:
+    		return "R11W";
+    	case REG_R11B:
+    		return "R11B";
+    #endif
+
+    #if defined(X64)
+		case REG_R12:
+			return "R12";
+		case REG_R12D:
+			return "R12D";
+    	case REG_R12W:
+    		return "R12W";
+    	case REG_R12B:
+    		return "R12B";
+    #endif
+
+    #if defined(X64)
+		case REG_R13:
+			return "R13";
+		case REG_R13D:
+			return "R13D";
+    	case REG_R13W:
+    		return "R13W";
+    	case REG_R13B:
+    		return "R13B";
+    #endif
+
+    #if defined(X64)
+		case REG_R14:
+			return "R14";
+		case REG_R14D:
+			return "R14D";
+    	case REG_R14W:
+    		return "R14W";
+    	case REG_R14B:
+    		return "R14B";
+    #endif
+
+    #if defined(X64)
+		case REG_R15:
+			return "R15";
+		case REG_R15D:
+			return "R15D";
+    	case REG_R15W:
+    		return "R15W";
+    	case REG_R15B:
+    		return "R15B";
+    #endif
+
 		default:
 			return "UNK";
 	}
@@ -335,6 +489,70 @@ bool add_reg_taint(REG reg, UINT32 threadid)
 	#endif
 		case REG_SI:	tainted_regs[threadid].push_front(REG_SI);
 						break;
+
+	#if defined(X64)
+		case REG_R8: 	tainted_regs[threadid].push_front(REG_R8);
+		case REG_R8D:	tainted_regs[threadid].push_front(REG_R8D);
+		case REG_R8W:	tainted_regs[threadid].push_front(REG_R8W);
+		case REG_R8B:	tainted_regs[threadid].push_front(REG_R8B);
+						break;
+	#endif
+
+	#if defined(X64)
+		case REG_R9: 	tainted_regs[threadid].push_front(REG_R9);
+		case REG_R9D:	tainted_regs[threadid].push_front(REG_R9D);
+		case REG_R9W:	tainted_regs[threadid].push_front(REG_R9W);
+		case REG_R9B:	tainted_regs[threadid].push_front(REG_R9B);
+						break;
+	#endif
+
+	#if defined(X64)
+		case REG_R10: 	tainted_regs[threadid].push_front(REG_R10);
+		case REG_R10D:	tainted_regs[threadid].push_front(REG_R10D);
+		case REG_R10W:	tainted_regs[threadid].push_front(REG_R10W);
+		case REG_R10B:	tainted_regs[threadid].push_front(REG_R10B);
+						break;
+	#endif
+
+	#if defined(X64)
+		case REG_R11: 	tainted_regs[threadid].push_front(REG_R11);
+		case REG_R11D:	tainted_regs[threadid].push_front(REG_R11D);
+		case REG_R11W:	tainted_regs[threadid].push_front(REG_R11W);
+		case REG_R11B:	tainted_regs[threadid].push_front(REG_R11B);
+						break;
+	#endif
+
+	#if defined(X64)
+		case REG_R12: 	tainted_regs[threadid].push_front(REG_R12);
+		case REG_R12D:	tainted_regs[threadid].push_front(REG_R12D);
+		case REG_R12W:	tainted_regs[threadid].push_front(REG_R12W);
+		case REG_R12B:	tainted_regs[threadid].push_front(REG_R12B);
+						break;
+	#endif
+
+	#if defined(X64)
+		case REG_R13: 	tainted_regs[threadid].push_front(REG_R13);
+		case REG_R13D:	tainted_regs[threadid].push_front(REG_R13D);
+		case REG_R13W:	tainted_regs[threadid].push_front(REG_R13W);
+		case REG_R13B:	tainted_regs[threadid].push_front(REG_R13B);
+						break;
+	#endif
+
+	#if defined(X64)
+		case REG_R14: 	tainted_regs[threadid].push_front(REG_R14);
+		case REG_R14D:	tainted_regs[threadid].push_front(REG_R14D);
+		case REG_R14W:	tainted_regs[threadid].push_front(REG_R14W);
+		case REG_R14B:	tainted_regs[threadid].push_front(REG_R14B);
+						break;
+	#endif
+
+	#if defined(X64)
+		case REG_R15: 	tainted_regs[threadid].push_front(REG_R15);
+		case REG_R15D:	tainted_regs[threadid].push_front(REG_R15D);
+		case REG_R15W:	tainted_regs[threadid].push_front(REG_R15W);
+		case REG_R15B:	tainted_regs[threadid].push_front(REG_R15B);
+						break;
+	#endif
 
 		default:		
 						return FALSE;
@@ -418,6 +636,70 @@ bool del_reg_taint(REG reg, UINT32 threadid)
 	#endif
 		case REG_SI:	tainted_regs[threadid].remove(REG_SI);
 						break;
+
+	#if defined(X64)
+		case REG_R8:	tainted_regs[threadid].remove(REG_R8);
+		case REG_R8D:	tainted_regs[threadid].remove(REG_R8D);
+		case REG_R8W:	tainted_regs[threadid].remove(REG_R8W);
+		case REG_R8B:	tainted_regs[threadid].remove(REG_R8B);
+						break;
+	#endif
+
+	#if defined(X64)
+		case REG_R9:	tainted_regs[threadid].remove(REG_R9);
+		case REG_R9D:	tainted_regs[threadid].remove(REG_R9D);
+		case REG_R9W:	tainted_regs[threadid].remove(REG_R9W);
+		case REG_R9B:	tainted_regs[threadid].remove(REG_R9B);
+						break;
+	#endif
+
+	#if defined(X64)
+		case REG_R10:	tainted_regs[threadid].remove(REG_R10);
+		case REG_R10D:	tainted_regs[threadid].remove(REG_R10D);
+		case REG_R10W:	tainted_regs[threadid].remove(REG_R10W);
+		case REG_R10B:	tainted_regs[threadid].remove(REG_R10B);
+						break;
+	#endif
+
+	#if defined(X64)
+		case REG_R11:	tainted_regs[threadid].remove(REG_R11);
+		case REG_R11D:	tainted_regs[threadid].remove(REG_R11D);
+		case REG_R11W:	tainted_regs[threadid].remove(REG_R11W);
+		case REG_R11B:	tainted_regs[threadid].remove(REG_R11B);
+						break;
+	#endif
+
+	#if defined(X64)
+		case REG_R12:	tainted_regs[threadid].remove(REG_R12);
+		case REG_R12D:	tainted_regs[threadid].remove(REG_R12D);
+		case REG_R12W:	tainted_regs[threadid].remove(REG_R12W);
+		case REG_R12B:	tainted_regs[threadid].remove(REG_R12B);
+						break;
+	#endif
+
+	#if defined(X64)
+		case REG_R13:	tainted_regs[threadid].remove(REG_R13);
+		case REG_R13D:	tainted_regs[threadid].remove(REG_R13D);
+		case REG_R13W:	tainted_regs[threadid].remove(REG_R13W);
+		case REG_R13B:	tainted_regs[threadid].remove(REG_R13B);
+						break;
+	#endif
+
+	#if defined(X64)
+		case REG_R14:	tainted_regs[threadid].remove(REG_R14);
+		case REG_R14D:	tainted_regs[threadid].remove(REG_R14D);
+		case REG_R14W:	tainted_regs[threadid].remove(REG_R14W);
+		case REG_R14B:	tainted_regs[threadid].remove(REG_R14B);
+						break;
+	#endif
+
+	#if defined(X64)
+		case REG_R15:	tainted_regs[threadid].remove(REG_R15);
+		case REG_R15D:	tainted_regs[threadid].remove(REG_R15D);
+		case REG_R15W:	tainted_regs[threadid].remove(REG_R15W);
+		case REG_R15B:	tainted_regs[threadid].remove(REG_R15B);
+						break;
+	#endif
 
 		default:		
 						return FALSE;
@@ -510,7 +792,7 @@ void find_tainted_data(ADDRINT mem)
 	for(i = 0; i < taint_data_len; i++)
 	{
 		if(i%0x10 == 0)
-			fprintf(f, "\n[+] founded tainted data " HEX_FMT ":\t", mem+i);
+			fprintf(f, "\n[+] found tainted data " HEX_FMT ":\t", mem+i);
 		fprintf( f, "%02X ", *(unsigned char *)(mem + i) );
 		if(taint_size)
 		{
@@ -522,7 +804,15 @@ void find_tainted_data(ADDRINT mem)
 		tainted_offsets[mem+i] = i;
 	}
 	fprintf(f, "\n");
+}
 
+void track_operations(OPCODE opcode, ADDRINT addr)
+{
+	bool is_cmp = ( opcode == XED_ICLASS_CMP) || ( opcode == XED_ICLASS_TEST );
+	if(is_cmp == true)
+		tainted_operations[addr] = 2;
+	else if(tainted_operations[addr] != 2)
+		tainted_operations[addr] = 1;
 }
 
 unsigned int offset = -1; /* индекс в tainted_data */
@@ -533,7 +823,6 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rr
 	ADDRINT taint_memory_read = 0, taint_memory_write = 0, taint_memory_ptr = 0;
 	ADDRINT register_value = 0;
 	REG reg = (REG) 0;
-	bool is_cmp = ( opcode == XED_ICLASS_CMP) || ( opcode == XED_ICLASS_TEST );
 	ins_count++;
 
 	if(ins_count % 1000000 == 0)
@@ -556,7 +845,6 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rr
 			break;
 		}
 	}
-
 
 	/* прямое обращение к памяти на чтение */
 	if( mems_count != 0 && (memop0_type == 1 || memop1_type == 1) && !is_spread ) /* если есть читаемые операнды памяти и не было найдено распространение */
@@ -588,16 +876,20 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rr
 			if(memop0_type == 2)
 			{
 				for(i = 0; i < size; i++)
+				{
 					add_mem_taint( memop0+i ); /* пометить записываемый 1 операнд памяти */
+					tainted_offsets[memop0+i] = offset+i;
+				}
 				taint_memory_write = memop0;
-				tainted_offsets[taint_memory_write] = offset;
 			}
 			if(memop1_type == 2)
 			{
 				for(i = 0; i < size; i++)
-					add_mem_taint( memop1+1 ); /* пометить записываемый 2 операнд памяти */
+				{
+					add_mem_taint( memop1+i ); /* пометить записываемый 2 операнд памяти */
+					tainted_offsets[memop1+i] = offset+i;
+				}
 				taint_memory_write = memop1;
-				tainted_offsets[taint_memory_write] = offset;
 			}
 		}
 		/* запись регистра */
@@ -626,7 +918,10 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rr
 	if(is_spread || taint_memory_ptr)
 		if( (eip >= low_boundary && eip < high_boundary) || (low_boundary == 0 && high_boundary == 0) )
 		{
-			tainted_operations[offset] = (is_cmp == true) ? 2 : 1;
+			for(i = 0; i < size; i++)
+			{
+				track_operations(opcode, offset+i);
+			}
 			fprintf(f, "%s " HEX_FMT ":%u:%lu:", get_module_name(eip), eip - get_module_base(eip), threadid, ins_count);
 			if(taint_memory_read)
 			{
@@ -669,7 +964,7 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rr
 				telescope( *((int *)taint_memory_ptr), 1 );
 			}
 			else if(reg)
-				fprintf( f, " %s=" HEX_FMT ";", get_reg_name(reg).c_str(), register_value );
+				fprintf( f, " %s=" HEX_FMT2 ";", get_reg_name(reg).c_str(), register_value );
 
 			fprintf(f, " [0x%x]\n", offset);
 			fflush(f);
@@ -788,18 +1083,23 @@ void fini(INT32 code, VOID *v)
 	{
 		if(i % 0x10 == 0)
 			fprintf(f, "\n0x%04x:\t", i);
-		switch( tainted_operations[i] )
+		if( taint_size == 0 || (i >= taint_offset && i < taint_offset+taint_size) )
 		{
-			case 2:
-				fprintf(f, "cc ");
-				break;
-			case 1:
-				fprintf(f, "rr ");
-				break;
-			default:
-				fprintf(f, "** ");
-				break;
+			switch( tainted_operations[i] )
+			{
+				case 2:
+					fprintf(f, "cc ");
+					break;
+				case 1:
+					fprintf(f, "rr ");
+					break;
+				default:
+					fprintf(f, "** ");
+					break;
+			}
 		}
+		else
+			fprintf(f, "-- ");
 	}
 	
 	fflush(f);
@@ -851,3 +1151,9 @@ int main(int argc, char ** argv)
 	PIN_StartProgram();
 	return 0;
 }
+
+/*
+TODO:
+	REG_XMM0
+	REG_ST0
+*/
