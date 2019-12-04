@@ -4,7 +4,7 @@
 #include <list>
 #include <map>
 
-#define VERSION "0.10"
+#define VERSION "0.11"
 #define MAX_TAINT_DATA 0x1000
 
 #if defined(__i386__) || defined(_WIN32)
@@ -44,11 +44,11 @@ UINT32 taint_size;
 unsigned long int ins_count = 0;
 
 KNOB<BOOL> Knob_debug(KNOB_MODE_WRITEONCE,  "pintool", "debug", "0", "Enable debug mode");
-KNOB<string> Knob_outfile(KNOB_MODE_WRITEONCE,  "pintool", "outfile", "taint.log", "Output file");
-KNOB<ADDRINT> Knob_from(KNOB_MODE_WRITEONCE, "pintool", "from", "0", "start address (absolute) for taint");
-KNOB<ADDRINT> Knob_to(KNOB_MODE_WRITEONCE, "pintool", "to", "0", "stop address (absolute) for taint");
-KNOB<string> Knob_module(KNOB_MODE_WRITEONCE,  "pintool", "module", "", "taint this module");
-KNOB<string> Knob_taint(KNOB_MODE_WRITEONCE,  "pintool", "taint", "", "taint this data");
+KNOB<string> Knob_outfile(KNOB_MODE_WRITEONCE,  "pintool", "outfile", "concolic.log", "Output file");
+KNOB<ADDRINT> Knob_from(KNOB_MODE_WRITEONCE, "pintool", "from", "0", "start address (absolute) for concolic");
+KNOB<ADDRINT> Knob_to(KNOB_MODE_WRITEONCE, "pintool", "to", "0", "stop address (absolute) for concolic");
+KNOB<string> Knob_module(KNOB_MODE_WRITEONCE,  "pintool", "module", "", "concolic this module");
+KNOB<string> Knob_taint(KNOB_MODE_WRITEONCE,  "pintool", "concolic", "", "concolic this data");
 KNOB<UINT32> Knob_offset(KNOB_MODE_WRITEONCE,  "pintool", "offset", "0", "from offset (subdata)");
 KNOB<UINT32> Knob_size(KNOB_MODE_WRITEONCE,  "pintool", "size", "0", "size bytes (subdata)");
 
@@ -811,43 +811,43 @@ void concolic(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32
 {
 	if( ( opcode == XED_ICLASS_CMP) || ( opcode == XED_ICLASS_TEST ) )
 	{
-		
+		fprintf(f, "[cmp]\n");
 	}
 	else if( opcode == XED_ICLASS_ADD )
 	{
-
+		fprintf(f, "[add]\n");
 	}
 	else if( opcode == XED_ICLASS_SUB )
 	{
-
+		fprintf(f, "[sub]\n");
 	}
 	else if( opcode == XED_ICLASS_MUL )
 	{
-		
+		fprintf(f, "[mul]\n");
 	}
 	else if( opcode == XED_ICLASS_DIV )
 	{
-		
+		fprintf(f, "[div]\n");
 	}
 	else if( opcode == XED_ICLASS_AND )
 	{
-
+		fprintf(f, "[and]\n");
 	}
 	else if( opcode == XED_ICLASS_OR )
 	{
-
+		fprintf(f, "[or]\n");
 	}
 	else if( opcode == XED_ICLASS_XOR )
 	{
-
+		fprintf(f, "[xor]\n");
 	}
 	else if( opcode == XED_ICLASS_NEG )
 	{
-
+		fprintf(f, "[neg]\n");
 	}
 	else if( opcode == XED_ICLASS_NOT )
 	{
-
+		fprintf(f, "[not]\n");
 	}
 }
 
