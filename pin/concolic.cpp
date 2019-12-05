@@ -4,7 +4,7 @@
 #include <list>
 #include <map>
 
-#define VERSION "0.14"
+#define VERSION "0.16"
 #define MAX_TAINT_DATA 0x1000
 
 #if defined(__i386__) || defined(_WIN32)
@@ -25,12 +25,23 @@ typedef struct {
 	ADDRINT high;
 } MODULE;
 
+typedef struct {
+	UINT64 value;
+	UINT32 size;
+} Operand;
+
+typedef struct {
+	Operand operand1;
+	Operand operand2;
+} Operands;
+
 list <ADDRINT> pages;
 list <MODULE> modules;
 list <ADDRINT> tainted_addrs;
 map <ADDRINT, unsigned int> tainted_offsets;
 map <ADDRINT, unsigned int> tainted_operations;
 map < int, list <REG> > tainted_regs;
+map < int, Operands > operands;
 
 string need_module;
 ADDRINT low_boundary;
@@ -596,126 +607,165 @@ void find_tainted_data(ADDRINT mem)
 	fprintf(f, "\n");
 }
 
-void concolic(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rregs_count, REG * rregs, UINT32 wregs_count, REG * wregs, UINT32 mems_count, UINT32 memop0_type, ADDRINT memop0, UINT32 memop1_type, ADDRINT memop1, UINT32 size, UINT64 immediate, UINT32 immediate_size)
+void get_operands_value(UINT32 threadid, CONTEXT * ctx, UINT32 rregs_count, REG * rregs, UINT32 wregs_count, REG * wregs, UINT32 mems_count, UINT32 memop0_type, ADDRINT memop0, UINT32 memop1_type, ADDRINT memop1, UINT32 size, UINT64 immediate, UINT32 immediate_size)
 {
 	UINT8 register_value[128] = {0};
+	PIN_GetContextRegval(ctx, rregs[0], (UINT8 *)&register_value);
+	operands[threadid].operand1.size = REG_Size(rregs[0]);
+	switch( operands[threadid].operand1.size )
+	{
+		case 1: operands[threadid].operand1.value = ((UINT8 *)register_value)[0];
+				break;
+		case 2: operands[threadid].operand1.value = (UINT64) ((UINT16 *)register_value)[0];
+				break;
+		case 4: operands[threadid].operand1.value = (UINT64) ((UINT32 *)register_value)[0];
+				break;
+		case 8: operands[threadid].operand1.value = ((UINT64 *)register_value)[0];
+				break;
+	}
+	if( mems_count == 1 ) /* ins reg, [mem] */
+	{
+		fprintf(f, "[debug] ins reg, [mem]\n");
+		operands[threadid].operand2.size = size;
+		switch(size)
+		{
+			case 1: operands[threadid].operand2.value = (UINT64) ((UINT8 *)memop0)[0];
+					break;
+			case 2: operands[threadid].operand2.value = (UINT64) ((UINT16 *)memop0)[0];
+					break;
+			case 4: operands[threadid].operand2.value = (UINT64) ((UINT32 *)memop0)[0];
+					break;
+			case 8: operands[threadid].operand2.value = ((UINT64 *)memop0)[0];
+					break;
+		}
+	}
+	else if( rregs_count == 2 ) /* ins reg, reg */
+	{
+		fprintf(f, "[debug] ins reg, reg\n");
+		PIN_GetContextRegval(ctx, rregs[1], (UINT8 *)&register_value);
+		operands[threadid].operand2.size = REG_Size(rregs[1]);
+		switch( operands[threadid].operand2.size )
+		{
+			case 1: operands[threadid].operand2.value = (UINT64) ((UINT8 *)register_value)[0];
+					break;
+			case 2: operands[threadid].operand2.value = (UINT64) ((UINT16 *)register_value)[0];
+					break;
+			case 4: operands[threadid].operand2.value = (UINT64) ((UINT32 *)register_value)[0];
+					break;
+			case 8: operands[threadid].operand2.value = ((UINT64 *)register_value)[0];
+					break;
+		}
+	}
+	else if( immediate_size > 0 )  /* ins reg, imm */
+	{
+		fprintf(f, "[debug] ins reg, imm\n");
+		operands[threadid].operand2.size = immediate_size/8;
+		switch(immediate_size)
+		{
+			case 8: operands[threadid].operand2.value = (UINT64) ((UINT8 *)&immediate)[0];
+					break;
+			case 16: operands[threadid].operand2.value = (UINT64) ((UINT16 *)&immediate)[0];
+					break;
+			case 32: operands[threadid].operand2.value = (UINT64) ((UINT32 *)&immediate)[0];
+					break;
+			case 64: operands[threadid].operand2.value = immediate;
+					break;
+		}
+	}
+	/* ins [mem], imm */
+}
+
+void concolic(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rregs_count, REG * rregs, UINT32 wregs_count, REG * wregs, UINT32 mems_count, UINT32 memop0_type, ADDRINT memop0, UINT32 memop1_type, ADDRINT memop1, UINT32 size, UINT64 immediate, UINT32 immediate_size)
+{
+	if(XED_ICLASS_JB > opcode || opcode > XED_ICLASS_JZ)
+		get_operands_value(threadid, ctx, rregs_count, rregs, wregs_count, wregs, mems_count, memop0_type, memop0, memop1_type, memop1, size, immediate, immediate_size);
 
 	if( ( opcode == XED_ICLASS_CMP) || ( opcode == XED_ICLASS_TEST ) )
 	{
-		UINT64 v1 = -1;
-		UINT64 v2 = -1;
-		PIN_GetContextRegval(ctx, rregs[0], (UINT8 *)&register_value);
-		switch( REG_Size(rregs[0]) )
+		fprintf(f, "(%d)", operands[threadid].operand1.size);
+		switch(operands[threadid].operand1.size)
 		{
-			case 1: v1 = (UINT64) ((UINT8 *)register_value)[0]; break;
-			case 2: v1 = (UINT64) ((UINT16 *)register_value)[0]; break;
-			case 4: v1 = (UINT64) ((UINT32 *)register_value)[0]; break;
-			case 8: v1 = ((UINT64 *)register_value)[0]; break;
+			case 1: fprintf(f, "x=%x, ", (UINT8)operands[threadid].operand1.value); break;
+			case 2: fprintf(f, "x=%x, ", (UINT16)operands[threadid].operand1.value); break;
+			case 4: fprintf(f, "x=%x, ", (UINT32)operands[threadid].operand1.value); break;
+			case 8: fprintf(f, "x=%lx, ", (UINT64)operands[threadid].operand1.value); break;
 		}
-		if( mems_count == 1 ) /* cmp reg, [mem] */
+		fprintf(f, "(%d)", operands[threadid].operand2.size);
+		switch(operands[threadid].operand2.size)
 		{
-			fprintf(f, "[debug] cmp reg, [mem]\n");
-			switch(size)
-			{
-				case 1: v2 = (UINT64) ((UINT8 *)memop0)[0]; break;
-				case 2: v2 = (UINT64) ((UINT16 *)memop0)[0]; break;
-				case 4: v2 = (UINT64) ((UINT32 *)memop0)[0]; break;
-				case 8: v2 = ((UINT64 *)memop0)[0]; break;
-			}
+			case 1: fprintf(f, "y=%x\n", (UINT8)operands[threadid].operand2.value); break;
+			case 2: fprintf(f, "y=%x\n", (UINT16)operands[threadid].operand2.value); break;
+			case 4: fprintf(f, "y=%x\n", (UINT32)operands[threadid].operand2.value); break;
+			case 8: fprintf(f, "y=%lx\n", (UINT64)operands[threadid].operand2.value); break;
 		}
-		else if( rregs_count == 2 ) /* cmp reg, reg */
-		{
-			fprintf(f, "[debug] cmp reg, reg\n");
-			PIN_GetContextRegval(ctx, rregs[1], (UINT8 *)&register_value);
-			switch( REG_Size(rregs[1]) )
-			{
-				case 1: v2 = (UINT64) ((UINT8 *)register_value)[0]; break;
-				case 2: v2 = (UINT64) ((UINT16 *)register_value)[0]; break;
-				case 4: v2 = (UINT64) ((UINT32 *)register_value)[0]; break;
-				case 8: v2 = ((UINT64 *)register_value)[0]; break;
-			}
-		}
-		else if( immediate_size > 0 )  /* cmp reg, imm */
-		{
-			fprintf(f, "[debug] cmp reg, imm\n");
-			switch(immediate_size)
-			{
-				case 8: v2 = (UINT64) ((UINT8 *)&immediate)[0]; break;
-				case 16: v2 = (UINT64) ((UINT16 *)&immediate)[0]; break;
-				case 32: v2 = (UINT64) ((UINT32 *)&immediate)[0]; break;
-				case 64: v2 = immediate; break;
-			}
-		}
-		
-		fprintf(f, "x=%lx, y=%lx\n", v1, v2);
 	}
 	else if( opcode == XED_ICLASS_ADD )
 	{
-		fprintf(f, "x+reg/imm\n");
+		fprintf(f, "%x =+ %x\n", (UINT8)operands[threadid].operand1.value, (UINT8)operands[threadid].operand2.value);
 	}
 	else if( opcode == XED_ICLASS_SUB )
 	{
-		fprintf(f, "x-reg/imm\n");
+		fprintf(f, "%x =- %x\n", (UINT8)operands[threadid].operand1.value, (UINT8)operands[threadid].operand2.value);
 	}
 	else if( opcode == XED_ICLASS_MUL )
 	{
-		fprintf(f, "x*reg/imm\n");
+		fprintf(f, "TODO =* %x\n", (UINT8)operands[threadid].operand1.value);
 	}
 	else if( opcode == XED_ICLASS_DIV )
 	{
-		fprintf(f, "x/reg/imm\n");
+		fprintf(f, "TODO =/ %x\n", (UINT8)operands[threadid].operand1.value);
 	}
 	else if( opcode == XED_ICLASS_AND )
 	{
-		fprintf(f, "x & reg/imm\n");
+		fprintf(f, "%x =& %x\n", (UINT8)operands[threadid].operand1.value, (UINT8)operands[threadid].operand2.value);
 	}
 	else if( opcode == XED_ICLASS_OR )
 	{
-		fprintf(f, "x | reg/imm\n");
+		fprintf(f, "%x =| %x\n", (UINT8)operands[threadid].operand1.value, (UINT8)operands[threadid].operand2.value);
 	}
 	else if( opcode == XED_ICLASS_XOR )
 	{
-		fprintf(f, "x ^ reg/imm\n");
+		fprintf(f, "%x =^ %x\n", (UINT8)operands[threadid].operand1.value, (UINT8)operands[threadid].operand2.value);
 	}
 	else if( opcode == XED_ICLASS_NEG )
 	{
-		fprintf(f, "!x\n");
+		fprintf(f, "!%x\n", (UINT8)operands[threadid].operand1.value);
 	}
 	else if( opcode == XED_ICLASS_NOT )
 	{
-		fprintf(f, "!x\n");
+		fprintf(f, "!%x\n", (UINT8)operands[threadid].operand1.value);
 	}
 	else if( opcode == XED_ICLASS_JB || opcode == XED_ICLASS_JL )
 	{
-		fprintf(f, "(x < y)\n");
+		fprintf(f, "(%x < %x)\n", (UINT8)operands[threadid].operand1.value, (UINT8)operands[threadid].operand2.value);
 	}
 	else if( opcode == XED_ICLASS_JNB || opcode == XED_ICLASS_JNL )
 	{
-		fprintf(f, "(x >= y)\n");
+		fprintf(f, "(%x >= %x)\n", (UINT8)operands[threadid].operand1.value, (UINT8)operands[threadid].operand2.value);
 	}
 	else if( opcode == XED_ICLASS_JBE || opcode == XED_ICLASS_JLE )
 	{
-		fprintf(f, "(x <= y)\n");
+		fprintf(f, "(%x <= %x)\n", (UINT8)operands[threadid].operand1.value, (UINT8)operands[threadid].operand2.value);
 	}
 	else if( opcode == XED_ICLASS_JNBE || opcode == XED_ICLASS_JNLE )
 	{
-		fprintf(f, "(x > y)\n");
+		fprintf(f, "(%x > %x)\n", (UINT8)operands[threadid].operand1.value, (UINT8)operands[threadid].operand2.value);
 	}
 	else if( opcode == XED_ICLASS_JZ )
 	{
-		fprintf(f, "(x == y)\n");
+		fprintf(f, "(%x == %x)\n", (UINT8)operands[threadid].operand1.value, (UINT8)operands[threadid].operand2.value);
 	}
 	else if( opcode == XED_ICLASS_JNZ )
 	{
-		fprintf(f, "(x != y)\n");
+		fprintf(f, "(%x != %x)\n", (UINT8)operands[threadid].operand1.value, (UINT8)operands[threadid].operand2.value);
 	}
 	else if( opcode == XED_ICLASS_JS )
 	{
-		fprintf(f, "(x < 0)\n");
+		fprintf(f, "(%x < 0)\n", (UINT8)operands[threadid].operand1.value);
 	}
 	else if( opcode == XED_ICLASS_JNS )
 	{
-		fprintf(f, "(x > 0)\n");
+		fprintf(f, "(%x > 0)\n", (UINT8)operands[threadid].operand1.value);
 	}
 	else if( opcode == XED_ICLASS_JO )
 	{
@@ -727,11 +777,11 @@ void concolic(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32
 	}
 	else if( opcode == XED_ICLASS_JP )
 	{
-		fprintf(f, "(X%%2 == 0)\n");
+		fprintf(f, "(%x%%2 == 0)\n", (UINT16)operands[threadid].operand1.value);
 	}		
 	else if( opcode == XED_ICLASS_JNP )
 	{
-		fprintf(f, "(X%%2 != 0)\n");
+		fprintf(f, "(%x%%2 != 0)\n", (UINT32)operands[threadid].operand1.value);
 	}
 	else if( opcode == XED_ICLASS_JCXZ )
 	{
@@ -862,7 +912,6 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rr
 	if(is_spread || taint_memory_ptr)
 		if( (eip >= low_boundary && eip < high_boundary) || (low_boundary == 0 && high_boundary == 0) )
 		{
-			concolic(threadid, eip, ctx, opcode, rregs_count, rregs, wregs_count, wregs, mems_count, memop0_type, memop0, memop1_type, memop1, size, immediate, immediate_size);
 			for(i = 0; i < size; i++)
 			{
 				track_operations(opcode, offset+i);
@@ -940,6 +989,7 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rr
 			}
 			fprintf(f, " [0x%x]\n", offset);
 			fflush(f);
+			concolic(threadid, eip, ctx, opcode, rregs_count, rregs, wregs_count, wregs, mems_count, memop0_type, memop0, memop1_type, memop1, size, immediate, immediate_size);
 		}
 }
 
