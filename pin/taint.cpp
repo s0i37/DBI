@@ -3,7 +3,7 @@
 #include <list>
 #include <map>
 
-#define VERSION "0.47"
+#define VERSION "0.50"
 #define MAX_TAINT_DATA 0x1000
 
 #if defined(__i386__) || defined(_WIN32)
@@ -81,392 +81,6 @@ bool check_reg_taint(REG reg, UINT32 threadid)
 		if( *it == reg )
 			return TRUE;
 	return FALSE;
-}
-
-REG get_full_reg(REG reg)
-{
-	switch(reg)
-	{
-		case REG_GAX:
-	#if defined(X64)
-		case REG_EAX:
-	#endif
-		case REG_AX:
-		case REG_AH:
-		case REG_AL:
-			return REG_GAX;
-
-		case REG_GCX:
-	#if defined(X64)
-		case REG_ECX:
-	#endif
-		case REG_CX:
-		case REG_CH:
-		case REG_CL:
-			return REG_GCX;
-
-		case REG_GDX:
-	#if defined(X64)
-		case REG_EDX:
-	#endif
-		case REG_DX:
-		case REG_DH:
-		case REG_DL:
-			return REG_GDX;
-
-		case REG_GBX:
-	#if defined(X64)
-		case REG_EBX:
-	#endif
-		case REG_BX:
-		case REG_BH:
-		case REG_BL:
-			return REG_GBX;
-
-	//	case REG_STACK_PTR:
-	//		return REG_STACK_PTR;
-
-		case REG_GBP:
-	#if defined(X64)
-		case REG_EBP:
-	#endif
-		case REG_BP:
-			return REG_GBP;
-
-		case REG_GDI:
-	#if defined(X64)
-		case REG_EDI:
-	#endif
-		case REG_DI:
-			return REG_GDI;
-
-		case REG_GSI:
-	#if defined(X64)
-		case REG_ESI:
-	#endif
-		case REG_SI:
-			return REG_GSI;
-
-	#if defined(X64)
-		case REG_R8:
-		case REG_R8D:
-    	case REG_R8W:
-    	case REG_R8B:
-    		return REG_R8;
-    #endif
-
-    #if defined(X64)
-    	case REG_R9:
-		case REG_R9D:
-    	case REG_R9W:
-    	case REG_R9B:
-    		return REG_R9;
-    #endif
-
-    #if defined(X64)
-    	case REG_R10:
-		case REG_R10D:
-    	case REG_R10W:
-    	case REG_R10B:
-    		return REG_R10;
-    #endif
-
-    #if defined(X64)
-    	case REG_R11:
-		case REG_R11D:
-    	case REG_R11W:
-    	case REG_R11B:
-    		return REG_R11;
-    #endif
-
-    #if defined(X64)
-    	case REG_R12:
-		case REG_R12D:
-    	case REG_R12W:
-    	case REG_R12B:
-    		return REG_R12;
-    #endif
-
-    #if defined(X64)
-    	case REG_R13:
-		case REG_R13D:
-    	case REG_R13W:
-    	case REG_R13B:
-    		return REG_R13;
-    #endif
-
-    #if defined(X64)
-    	case REG_R14:
-		case REG_R14D:
-    	case REG_R14W:
-    	case REG_R14B:
-    		return REG_R14;
-    #endif
-
-    #if defined(X64)
-    	case REG_R15:
-		case REG_R15D:
-    	case REG_R15W:
-    	case REG_R15B:
-    		return REG_R15;
-    #endif
-
-    case REG_XMM0:	return REG_XMM0;
-    case REG_XMM1:	return REG_XMM1;
-    case REG_XMM2:	return REG_XMM2;
-    case REG_XMM3:	return REG_XMM3;
-    case REG_XMM4:	return REG_XMM4;
-    case REG_XMM5:	return REG_XMM5;
-    case REG_XMM6:	return REG_XMM6;
-    case REG_XMM7:	return REG_XMM7;
-    #if defined(X64)
-	    case REG_XMM8:	return REG_XMM8;
-	    case REG_XMM9:	return REG_XMM9;
-	    case REG_XMM10:	return REG_XMM10;
-	    case REG_XMM11:	return REG_XMM11;
-	    case REG_XMM12:	return REG_XMM12;
-	    case REG_XMM13:	return REG_XMM13;
-	    case REG_XMM14:	return REG_XMM14;
-	    case REG_XMM15:	return REG_XMM15;
-    #endif
-
-    case REG_ST0: return REG_ST0;
-    case REG_ST1: return REG_ST1;
-    case REG_ST2: return REG_ST2;
-    case REG_ST3: return REG_ST3;
-    case REG_ST4: return REG_ST4;
-    case REG_ST5: return REG_ST5;
-    case REG_ST6: return REG_ST6;
-    case REG_ST7: return REG_ST7;
-
-		default:
-			return (REG) 0;
-	}
-}
-
-string get_reg_name(REG reg)
-{
-	switch(reg)
-	{
-	#if defined(X64)
-		case REG_GAX:
-			return "RAX";
-		case REG_EAX:
-			return "EAX";
-	#elif defined(X32)
-		case REG_GAX:
-			return "EAX";
-	#endif
-		case REG_AX:
-			return "AX";
-		case REG_AH:
-			return "AH";
-		case REG_AL:
-			return "AL";
-
-	#if defined(X64)
-		case REG_GCX:
-			return "RCX";
-		case REG_ECX:
-			return "ECX";
-	#elif defined(X32)
-		case REG_GCX:
-			return "ECX";
-	#endif
-		case REG_CX:
-			return "CX";
-		case REG_CH:
-			return "CH";
-		case REG_CL:
-			return "CL";
-
-	#if defined(X64)
-		case REG_GDX:
-			return "RDX";
-		case REG_EDX:
-			return "EDX";
-	#elif defined(X32)
-		case REG_GDX:
-			return "EDX";
-	#endif
-		case REG_DX:
-			return "DX";
-		case REG_DH:
-			return "DH";
-		case REG_DL:
-			return "DL";
-
-	#if defined(X64)
-		case REG_GBX:
-			return "RBX";
-		case REG_EBX:
-			return "EBX";
-	#elif defined(X32)
-		case REG_GBX:
-			return "EBX";
-	#endif
-		case REG_BX:
-			return "BX";
-		case REG_BH:
-			return "BH";
-		case REG_BL:
-			return "BL";
-
-	#if defined(X64)
-		case REG_GBP:
-			return "RBP";
-		case REG_EBP:
-			return "EBP";
-	#elif defined(X32)
-		case REG_GBP:
-			return "EBP";
-	#endif
-		case REG_BP:
-			return "BP";
-
-	#if defined(X64)
-		case REG_GDI:
-			return "RDI";
-		case REG_EDI:
-			return "EDI";
-	#elif defined(X32)
-		case REG_GDI:
-			return "EDI";
-	#endif
-		case REG_DI:
-			return "DI";
-
-	#if defined(X64)
-		case REG_GSI:
-			return "RSI";
-		case REG_ESI:
-			return "ESI";
-	#elif defined(X32)
-		case REG_GSI:
-			return "ESI";
-	#endif
-		case REG_SI:
-			return "SI";
-
-	#if defined(X64)
-		case REG_R8:
-			return "R8";
-		case REG_R8D:
-			return "R8D";
-    	case REG_R8W:
-    		return "R8W";
-    	case REG_R8B:
-    		return "R8B";
-    #endif
-
-    #if defined(X64)
-		case REG_R9:
-			return "R9";
-		case REG_R9D:
-			return "R9D";
-    	case REG_R9W:
-    		return "R9W";
-    	case REG_R9B:
-    		return "R9B";
-    #endif
-
-    #if defined(X64)
-		case REG_R10:
-			return "R10";
-		case REG_R10D:
-			return "R10D";
-    	case REG_R10W:
-    		return "R10W";
-    	case REG_R10B:
-    		return "R10B";
-    #endif
-
-    #if defined(X64)
-		case REG_R11:
-			return "R11";
-		case REG_R11D:
-			return "R11D";
-    	case REG_R11W:
-    		return "R11W";
-    	case REG_R11B:
-    		return "R11B";
-    #endif
-
-    #if defined(X64)
-		case REG_R12:
-			return "R12";
-		case REG_R12D:
-			return "R12D";
-    	case REG_R12W:
-    		return "R12W";
-    	case REG_R12B:
-    		return "R12B";
-    #endif
-
-    #if defined(X64)
-		case REG_R13:
-			return "R13";
-		case REG_R13D:
-			return "R13D";
-    	case REG_R13W:
-    		return "R13W";
-    	case REG_R13B:
-    		return "R13B";
-    #endif
-
-    #if defined(X64)
-		case REG_R14:
-			return "R14";
-		case REG_R14D:
-			return "R14D";
-    	case REG_R14W:
-    		return "R14W";
-    	case REG_R14B:
-    		return "R14B";
-    #endif
-
-    #if defined(X64)
-		case REG_R15:
-			return "R15";
-		case REG_R15D:
-			return "R15D";
-    	case REG_R15W:
-    		return "R15W";
-    	case REG_R15B:
-    		return "R15B";
-    #endif
-
-    case REG_XMM0: return "XMM0";
-    case REG_XMM1: return "XMM1";
-    case REG_XMM2: return "XMM2";
-    case REG_XMM3: return "XMM3";
-    case REG_XMM4: return "XMM4";
-    case REG_XMM5: return "XMM5";
-    case REG_XMM6: return "XMM6";
-    case REG_XMM7: return "XMM7";
-    #if defined(X64)
-	    case REG_XMM8: return "XMM8";
-	    case REG_XMM9: return "XMM9";
-	    case REG_XMM10: return "XMM10";
-	    case REG_XMM11: return "XMM11";
-	    case REG_XMM12: return "XMM12";
-	    case REG_XMM13: return "XMM13";
-	    case REG_XMM14: return "XMM14";
-	    case REG_XMM15: return "XMM15";
-    #endif
-
-    case REG_ST0: return "ST0";
-    case REG_ST1: return "ST1";
-    case REG_ST2: return "ST2";
-    case REG_ST3: return "ST3";
-    case REG_ST4: return "ST4";
-    case REG_ST5: return "ST5";
-    case REG_ST6: return "ST6";
-    case REG_ST7: return "ST7";
-
-		default:
-			return "UNK";
-	}
 }
 
 bool add_reg_taint(REG reg, UINT32 threadid)
@@ -661,6 +275,13 @@ bool add_reg_taint(REG reg, UINT32 threadid)
 					break;
 	case REG_ST7:	tainted_regs[threadid].push_front(REG_ST7);
 					break;
+
+	#if defined(X64)
+		case REG_RFLAGS:	tainted_regs[threadid].push_front(REG_RFLAGS);
+	#endif
+	case REG_EFLAGS:	tainted_regs[threadid].push_front(REG_EFLAGS);
+	case REG_FLAGS:		tainted_regs[threadid].push_front(REG_FLAGS);
+						break;
 		
 		default:		
 						return FALSE;
@@ -862,6 +483,13 @@ bool del_reg_taint(REG reg, UINT32 threadid)
 	case REG_ST7:	tainted_regs[threadid].remove(REG_ST7);
 					break;
 
+	#if defined(X64)
+		case REG_RFLAGS:	tainted_regs[threadid].remove(REG_RFLAGS);
+	#endif
+	case REG_EFLAGS:	tainted_regs[threadid].remove(REG_EFLAGS);
+	case REG_FLAGS:		tainted_regs[threadid].remove(REG_FLAGS);
+						break;
+
 		default:		
 						return FALSE;
 	}
@@ -982,9 +610,8 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rr
 	UINT32 i, j, is_spread = 0;
 	list <ADDRINT>::iterator addr_it;
 	ADDRINT taint_memory_read = 0, taint_memory_write = 0, taint_memory_ptr = 0;
-	//ADDRINT register_value = 0;
 	REG reg = (REG) 0;
-	PIN_REGISTER register_value;
+	UINT8 register_value[128] = {0};
 	ins_count++;
 
 	if(ins_count % 1000000 == 0)
@@ -1002,7 +629,9 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rr
 		if( check_reg_taint( rregs[i], threadid ) ) /* проверить - не помечен ли регистр */
 		{
 			is_spread = 1;
-			if( ( reg = get_full_reg(rregs[i]) ) != 0 )
+			//if( ( reg = get_full_reg(rregs[i]) ) != 0 )
+			//if( ( reg = REG_FullRegName(rregs[i]) ) != 0 )
+			if( ( reg = rregs[i] ) != 0 )
 			{
 				PIN_GetContextRegval(ctx, reg, (UINT8 *)&register_value);
 			}
@@ -1071,7 +700,6 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rr
 			del_mem_taint( memop0 );
 		if(memop1_type == 2)
 			del_mem_taint( memop1 );
-		
 	}
 
 	if(memop0_type)
@@ -1086,7 +714,7 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rr
 			{
 				track_operations(opcode, offset+i);
 			}
-			fprintf(f, "%s " HEX_FMT ":%u:%lu:", get_module_name(eip), eip - get_module_base(eip), threadid, ins_count);
+			fprintf(f, "[+] %s " HEX_FMT ":%u:%lu:", get_module_name(eip), eip - get_module_base(eip), threadid, ins_count);
 			if(taint_memory_read)
 			{
 				switch(size)
@@ -1113,23 +741,50 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rr
 				switch(size)
 				{
 					case 8:
-						fprintf( f, " %s:*" HEX_FMT " = %08lX", get_reg_name(reg).c_str(), taint_memory_ptr, *((unsigned long int *)taint_memory_ptr) );
+						fprintf( f, " %s:*" HEX_FMT " = %08lX", REG_StringShort(reg).c_str(), taint_memory_ptr, *((unsigned long int *)taint_memory_ptr) );
 						break;
 					case 4:
-						fprintf( f, " %s:*" HEX_FMT " = %08X", get_reg_name(reg).c_str(), taint_memory_ptr, *((unsigned int *)taint_memory_ptr) );
+						fprintf( f, " %s:*" HEX_FMT " = %08X", REG_StringShort(reg).c_str(), taint_memory_ptr, *((unsigned int *)taint_memory_ptr) );
 						break;
 					case 2:
-						fprintf( f, " %s:*" HEX_FMT " = %04X", get_reg_name(reg).c_str(), taint_memory_ptr, *((unsigned short *)taint_memory_ptr) );
+						fprintf( f, " %s:*" HEX_FMT " = %04X", REG_StringShort(reg).c_str(), taint_memory_ptr, *((unsigned short *)taint_memory_ptr) );
 						break;
 					case 1:
-						fprintf( f, " %s:*" HEX_FMT " = %02X", get_reg_name(reg).c_str(), taint_memory_ptr, *((unsigned char *)taint_memory_ptr) );
+						fprintf( f, " %s:*" HEX_FMT " = %02X", REG_StringShort(reg).c_str(), taint_memory_ptr, *((unsigned char *)taint_memory_ptr) );
 						break;
 				}
 				telescope( *((int *)taint_memory_ptr), 1 );
 			}
 			else if(reg)
-				fprintf( f, " %s=" HEX_FMT2 ";", get_reg_name(reg).c_str(), (long unsigned int)register_value );
-
+			{
+				switch(REG_Size(reg))
+				{
+					case 1:
+						fprintf( f, " %s=%02X;", REG_StringShort(reg).c_str(), (UINT8)register_value[0] );
+						break;
+					case 2:
+						fprintf( f, " %s=%04X;", REG_StringShort(reg).c_str(), (UINT16)register_value[0] );
+						break;
+					case 4:
+						fprintf( f, " %s=%08X;", REG_StringShort(reg).c_str(), (UINT32)register_value[0] );
+						break;
+					#if defined(X64)
+						case 8:
+							fprintf( f, " %s=%016lX;", REG_StringShort(reg).c_str(), (UINT64)register_value[0] );
+							break;
+						case 16:
+							fprintf( f, " %s=%016lX%016lX;", REG_StringShort(reg).c_str(), ((UINT64 *)register_value)[1], ((UINT64 *)register_value)[0] );
+							break;
+					#else
+						case 8:
+							fprintf( f, " %s=%08X%08X;", REG_StringShort(reg).c_str(), ((UINT32 *)register_value)[1], ((UINT32 *)register_value)[0] );
+							break;
+						case 16:
+							fprintf( f, " %s=%08X%08X%08X%08X;", REG_StringShort(reg).c_str(), ((UINT32 *)register_value)[3], ((UINT32 *)register_value)[2], ((UINT32 *)register_value)[1], ((UINT32 *)register_value)[0] );
+							break;
+					#endif
+				}
+			}
 			fprintf(f, " [0x%x]\n", offset);
 			fflush(f);
 		}

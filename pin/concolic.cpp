@@ -4,7 +4,7 @@
 #include <list>
 #include <map>
 
-#define VERSION "0.11"
+#define VERSION "0.14"
 #define MAX_TAINT_DATA 0x1000
 
 #if defined(__i386__) || defined(_WIN32)
@@ -45,10 +45,10 @@ unsigned long int ins_count = 0;
 
 KNOB<BOOL> Knob_debug(KNOB_MODE_WRITEONCE,  "pintool", "debug", "0", "Enable debug mode");
 KNOB<string> Knob_outfile(KNOB_MODE_WRITEONCE,  "pintool", "outfile", "concolic.log", "Output file");
-KNOB<ADDRINT> Knob_from(KNOB_MODE_WRITEONCE, "pintool", "from", "0", "start address (absolute) for concolic");
-KNOB<ADDRINT> Knob_to(KNOB_MODE_WRITEONCE, "pintool", "to", "0", "stop address (absolute) for concolic");
-KNOB<string> Knob_module(KNOB_MODE_WRITEONCE,  "pintool", "module", "", "concolic this module");
-KNOB<string> Knob_taint(KNOB_MODE_WRITEONCE,  "pintool", "concolic", "", "concolic this data");
+KNOB<ADDRINT> Knob_from(KNOB_MODE_WRITEONCE, "pintool", "from", "0", "start address (absolute) for taint");
+KNOB<ADDRINT> Knob_to(KNOB_MODE_WRITEONCE, "pintool", "to", "0", "stop address (absolute) for taint");
+KNOB<string> Knob_module(KNOB_MODE_WRITEONCE,  "pintool", "module", "", "taint this module");
+KNOB<string> Knob_taint(KNOB_MODE_WRITEONCE,  "pintool", "taint", "", "taint this data");
 KNOB<UINT32> Knob_offset(KNOB_MODE_WRITEONCE,  "pintool", "offset", "0", "from offset (subdata)");
 KNOB<UINT32> Knob_size(KNOB_MODE_WRITEONCE,  "pintool", "size", "0", "size bytes (subdata)");
 
@@ -82,336 +82,6 @@ bool check_reg_taint(REG reg, UINT32 threadid)
 		if( *it == reg )
 			return TRUE;
 	return FALSE;
-}
-
-REG get_full_reg(REG reg)
-{
-	switch(reg)
-	{
-		case REG_GAX:
-	#if defined(X64)
-		case REG_EAX:
-	#endif
-		case REG_AX:
-		case REG_AH:
-		case REG_AL:
-			return REG_GAX;
-
-		case REG_GCX:
-	#if defined(X64)
-		case REG_ECX:
-	#endif
-		case REG_CX:
-		case REG_CH:
-		case REG_CL:
-			return REG_GCX;
-
-		case REG_GDX:
-	#if defined(X64)
-		case REG_EDX:
-	#endif
-		case REG_DX:
-		case REG_DH:
-		case REG_DL:
-			return REG_GDX;
-
-		case REG_GBX:
-	#if defined(X64)
-		case REG_EBX:
-	#endif
-		case REG_BX:
-		case REG_BH:
-		case REG_BL:
-			return REG_GBX;
-
-	//	case REG_STACK_PTR:
-	//		return REG_STACK_PTR;
-
-		case REG_GBP:
-	#if defined(X64)
-		case REG_EBP:
-	#endif
-		case REG_BP:
-			return REG_GBP;
-
-		case REG_GDI:
-	#if defined(X64)
-		case REG_EDI:
-	#endif
-		case REG_DI:
-			return REG_GDI;
-
-		case REG_GSI:
-	#if defined(X64)
-		case REG_ESI:
-	#endif
-		case REG_SI:
-			return REG_GSI;
-
-	#if defined(X64)
-		case REG_R8:
-		case REG_R8D:
-    	case REG_R8W:
-    	case REG_R8B:
-    		return REG_R8;
-    #endif
-
-    #if defined(X64)
-    	case REG_R9:
-		case REG_R9D:
-    	case REG_R9W:
-    	case REG_R9B:
-    		return REG_R9;
-    #endif
-
-    #if defined(X64)
-    	case REG_R10:
-		case REG_R10D:
-    	case REG_R10W:
-    	case REG_R10B:
-    		return REG_R10;
-    #endif
-
-    #if defined(X64)
-    	case REG_R11:
-		case REG_R11D:
-    	case REG_R11W:
-    	case REG_R11B:
-    		return REG_R11;
-    #endif
-
-    #if defined(X64)
-    	case REG_R12:
-		case REG_R12D:
-    	case REG_R12W:
-    	case REG_R12B:
-    		return REG_R12;
-    #endif
-
-    #if defined(X64)
-    	case REG_R13:
-		case REG_R13D:
-    	case REG_R13W:
-    	case REG_R13B:
-    		return REG_R13;
-    #endif
-
-    #if defined(X64)
-    	case REG_R14:
-		case REG_R14D:
-    	case REG_R14W:
-    	case REG_R14B:
-    		return REG_R14;
-    #endif
-
-    #if defined(X64)
-    	case REG_R15:
-		case REG_R15D:
-    	case REG_R15W:
-    	case REG_R15B:
-    		return REG_R15;
-    #endif
-
-		default:
-			return (REG) 0;
-	}
-}
-
-string get_reg_name(REG reg)
-{
-	switch(reg)
-	{
-	#if defined(X64)
-		case REG_GAX:
-			return "RAX";
-		case REG_EAX:
-			return "EAX";
-	#elif defined(X32)
-		case REG_GAX:
-			return "EAX";
-	#endif
-		case REG_AX:
-			return "AX";
-		case REG_AH:
-			return "AH";
-		case REG_AL:
-			return "AL";
-
-	#if defined(X64)
-		case REG_GCX:
-			return "RCX";
-		case REG_ECX:
-			return "ECX";
-	#elif defined(X32)
-		case REG_GCX:
-			return "ECX";
-	#endif
-		case REG_CX:
-			return "CX";
-		case REG_CH:
-			return "CH";
-		case REG_CL:
-			return "CL";
-
-	#if defined(X64)
-		case REG_GDX:
-			return "RDX";
-		case REG_EDX:
-			return "EDX";
-	#elif defined(X32)
-		case REG_GDX:
-			return "EDX";
-	#endif
-		case REG_DX:
-			return "DX";
-		case REG_DH:
-			return "DH";
-		case REG_DL:
-			return "DL";
-
-	#if defined(X64)
-		case REG_GBX:
-			return "RBX";
-		case REG_EBX:
-			return "EBX";
-	#elif defined(X32)
-		case REG_GBX:
-			return "EBX";
-	#endif
-		case REG_BX:
-			return "BX";
-		case REG_BH:
-			return "BH";
-		case REG_BL:
-			return "BL";
-
-	#if defined(X64)
-		case REG_GBP:
-			return "RBP";
-		case REG_EBP:
-			return "EBP";
-	#elif defined(X32)
-		case REG_GBP:
-			return "EBP";
-	#endif
-		case REG_BP:
-			return "BP";
-
-	#if defined(X64)
-		case REG_GDI:
-			return "RDI";
-		case REG_EDI:
-			return "EDI";
-	#elif defined(X32)
-		case REG_GDI:
-			return "EDI";
-	#endif
-		case REG_DI:
-			return "DI";
-
-	#if defined(X64)
-		case REG_GSI:
-			return "RSI";
-		case REG_ESI:
-			return "ESI";
-	#elif defined(X32)
-		case REG_GSI:
-			return "ESI";
-	#endif
-		case REG_SI:
-			return "SI";
-
-	#if defined(X64)
-		case REG_R8:
-			return "R8";
-		case REG_R8D:
-			return "R8D";
-    	case REG_R8W:
-    		return "R8W";
-    	case REG_R8B:
-    		return "R8B";
-    #endif
-
-    #if defined(X64)
-		case REG_R9:
-			return "R9";
-		case REG_R9D:
-			return "R9D";
-    	case REG_R9W:
-    		return "R9W";
-    	case REG_R9B:
-    		return "R9B";
-    #endif
-
-    #if defined(X64)
-		case REG_R10:
-			return "R10";
-		case REG_R10D:
-			return "R10D";
-    	case REG_R10W:
-    		return "R10W";
-    	case REG_R10B:
-    		return "R10B";
-    #endif
-
-    #if defined(X64)
-		case REG_R11:
-			return "R11";
-		case REG_R11D:
-			return "R11D";
-    	case REG_R11W:
-    		return "R11W";
-    	case REG_R11B:
-    		return "R11B";
-    #endif
-
-    #if defined(X64)
-		case REG_R12:
-			return "R12";
-		case REG_R12D:
-			return "R12D";
-    	case REG_R12W:
-    		return "R12W";
-    	case REG_R12B:
-    		return "R12B";
-    #endif
-
-    #if defined(X64)
-		case REG_R13:
-			return "R13";
-		case REG_R13D:
-			return "R13D";
-    	case REG_R13W:
-    		return "R13W";
-    	case REG_R13B:
-    		return "R13B";
-    #endif
-
-    #if defined(X64)
-		case REG_R14:
-			return "R14";
-		case REG_R14D:
-			return "R14D";
-    	case REG_R14W:
-    		return "R14W";
-    	case REG_R14B:
-    		return "R14B";
-    #endif
-
-    #if defined(X64)
-		case REG_R15:
-			return "R15";
-		case REG_R15D:
-			return "R15D";
-    	case REG_R15W:
-    		return "R15W";
-    	case REG_R15B:
-    		return "R15B";
-    #endif
-
-		default:
-			return "UNK";
-	}
 }
 
 bool add_reg_taint(REG reg, UINT32 threadid)
@@ -555,6 +225,65 @@ bool add_reg_taint(REG reg, UINT32 threadid)
 						break;
 	#endif
 
+	case REG_XMM0:	tainted_regs[threadid].push_front(REG_XMM0);
+					break;
+	case REG_XMM1:	tainted_regs[threadid].push_front(REG_XMM1);
+					break;
+	case REG_XMM2:	tainted_regs[threadid].push_front(REG_XMM2);
+					break;
+	case REG_XMM3:	tainted_regs[threadid].push_front(REG_XMM3);
+					break;
+	case REG_XMM4:	tainted_regs[threadid].push_front(REG_XMM4);
+					break;
+	case REG_XMM5:	tainted_regs[threadid].push_front(REG_XMM5);
+					break;
+	case REG_XMM6:	tainted_regs[threadid].push_front(REG_XMM6);
+					break;
+	case REG_XMM7:	tainted_regs[threadid].push_front(REG_XMM7);
+					break;
+	#if defined(X64)
+	case REG_XMM8:	tainted_regs[threadid].push_front(REG_XMM8);
+					break;
+	case REG_XMM9:	tainted_regs[threadid].push_front(REG_XMM9);
+					break;
+	case REG_XMM10:	tainted_regs[threadid].push_front(REG_XMM10);
+					break;
+	case REG_XMM11:	tainted_regs[threadid].push_front(REG_XMM11);
+					break;
+	case REG_XMM12:	tainted_regs[threadid].push_front(REG_XMM12);
+					break;
+	case REG_XMM13:	tainted_regs[threadid].push_front(REG_XMM13);
+					break;
+	case REG_XMM14:	tainted_regs[threadid].push_front(REG_XMM14);
+					break;
+	case REG_XMM15:	tainted_regs[threadid].push_front(REG_XMM15);
+					break;
+	#endif
+
+	case REG_ST0:	tainted_regs[threadid].push_front(REG_ST0);
+					break;
+	case REG_ST1:	tainted_regs[threadid].push_front(REG_ST1);
+					break;
+	case REG_ST2:	tainted_regs[threadid].push_front(REG_ST2);
+					break;
+	case REG_ST3:	tainted_regs[threadid].push_front(REG_ST3);
+					break;
+	case REG_ST4:	tainted_regs[threadid].push_front(REG_ST4);
+					break;
+	case REG_ST5:	tainted_regs[threadid].push_front(REG_ST5);
+					break;
+	case REG_ST6:	tainted_regs[threadid].push_front(REG_ST6);
+					break;
+	case REG_ST7:	tainted_regs[threadid].push_front(REG_ST7);
+					break;
+
+	#if defined(X64)
+		case REG_RFLAGS:	tainted_regs[threadid].push_front(REG_RFLAGS);
+	#endif
+	case REG_EFLAGS:	tainted_regs[threadid].push_front(REG_EFLAGS);
+	case REG_FLAGS:		tainted_regs[threadid].push_front(REG_FLAGS);
+						break;
+		
 		default:		
 						return FALSE;
 	}
@@ -702,6 +431,66 @@ bool del_reg_taint(REG reg, UINT32 threadid)
 						break;
 	#endif
 
+	case REG_XMM0:	tainted_regs[threadid].remove(REG_XMM0);
+					break;
+	case REG_XMM1:	tainted_regs[threadid].remove(REG_XMM1);
+					break;
+	case REG_XMM2:	tainted_regs[threadid].remove(REG_XMM2);
+					break;
+	case REG_XMM3:	tainted_regs[threadid].remove(REG_XMM3);
+					break;
+	case REG_XMM4:	tainted_regs[threadid].remove(REG_XMM4);
+					break;
+	case REG_XMM5:	tainted_regs[threadid].remove(REG_XMM5);
+					break;
+	case REG_XMM6:	tainted_regs[threadid].remove(REG_XMM6);
+					break;
+	case REG_XMM7:	tainted_regs[threadid].remove(REG_XMM7);
+					break;
+	#if defined(X64)
+	case REG_XMM8:	tainted_regs[threadid].remove(REG_XMM8);
+					break;
+	case REG_XMM9:	tainted_regs[threadid].remove(REG_XMM9);
+					break;
+	case REG_XMM10:	tainted_regs[threadid].remove(REG_XMM10);
+					break;
+	case REG_XMM11:	tainted_regs[threadid].remove(REG_XMM11);
+					break;
+	case REG_XMM12:	tainted_regs[threadid].remove(REG_XMM12);
+					break;
+	case REG_XMM13:	tainted_regs[threadid].remove(REG_XMM13);
+					break;
+	case REG_XMM14:	tainted_regs[threadid].remove(REG_XMM14);
+					break;
+	case REG_XMM15:	tainted_regs[threadid].remove(REG_XMM15);
+					break;
+	#endif
+					
+	
+	case REG_ST0:	tainted_regs[threadid].remove(REG_ST0);
+					break;
+	case REG_ST1:	tainted_regs[threadid].remove(REG_ST1);
+					break;
+	case REG_ST2:	tainted_regs[threadid].remove(REG_ST2);
+					break;
+	case REG_ST3:	tainted_regs[threadid].remove(REG_ST3);
+					break;
+	case REG_ST4:	tainted_regs[threadid].remove(REG_ST4);
+					break;
+	case REG_ST5:	tainted_regs[threadid].remove(REG_ST5);
+					break;
+	case REG_ST6:	tainted_regs[threadid].remove(REG_ST6);
+					break;
+	case REG_ST7:	tainted_regs[threadid].remove(REG_ST7);
+					break;
+
+	#if defined(X64)
+		case REG_RFLAGS:	tainted_regs[threadid].remove(REG_RFLAGS);
+	#endif
+	case REG_EFLAGS:	tainted_regs[threadid].remove(REG_EFLAGS);
+	case REG_FLAGS:		tainted_regs[threadid].remove(REG_FLAGS);
+						break;
+
 		default:		
 						return FALSE;
 	}
@@ -807,47 +596,154 @@ void find_tainted_data(ADDRINT mem)
 	fprintf(f, "\n");
 }
 
-void concolic(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rregs_count, REG * rregs, UINT32 wregs_count, REG * wregs, UINT32 mems_count, UINT32 memop0_type, ADDRINT memop0, UINT32 memop1_type, ADDRINT memop1, UINT32 size)
+void concolic(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rregs_count, REG * rregs, UINT32 wregs_count, REG * wregs, UINT32 mems_count, UINT32 memop0_type, ADDRINT memop0, UINT32 memop1_type, ADDRINT memop1, UINT32 size, UINT64 immediate, UINT32 immediate_size)
 {
+	UINT8 register_value[128] = {0};
+
 	if( ( opcode == XED_ICLASS_CMP) || ( opcode == XED_ICLASS_TEST ) )
 	{
-		fprintf(f, "[cmp]\n");
+		UINT64 v1 = -1;
+		UINT64 v2 = -1;
+		PIN_GetContextRegval(ctx, rregs[0], (UINT8 *)&register_value);
+		switch( REG_Size(rregs[0]) )
+		{
+			case 1: v1 = (UINT64) ((UINT8 *)register_value)[0]; break;
+			case 2: v1 = (UINT64) ((UINT16 *)register_value)[0]; break;
+			case 4: v1 = (UINT64) ((UINT32 *)register_value)[0]; break;
+			case 8: v1 = ((UINT64 *)register_value)[0]; break;
+		}
+		if( mems_count == 1 ) /* cmp reg, [mem] */
+		{
+			fprintf(f, "[debug] cmp reg, [mem]\n");
+			switch(size)
+			{
+				case 1: v2 = (UINT64) ((UINT8 *)memop0)[0]; break;
+				case 2: v2 = (UINT64) ((UINT16 *)memop0)[0]; break;
+				case 4: v2 = (UINT64) ((UINT32 *)memop0)[0]; break;
+				case 8: v2 = ((UINT64 *)memop0)[0]; break;
+			}
+		}
+		else if( rregs_count == 2 ) /* cmp reg, reg */
+		{
+			fprintf(f, "[debug] cmp reg, reg\n");
+			PIN_GetContextRegval(ctx, rregs[1], (UINT8 *)&register_value);
+			switch( REG_Size(rregs[1]) )
+			{
+				case 1: v2 = (UINT64) ((UINT8 *)register_value)[0]; break;
+				case 2: v2 = (UINT64) ((UINT16 *)register_value)[0]; break;
+				case 4: v2 = (UINT64) ((UINT32 *)register_value)[0]; break;
+				case 8: v2 = ((UINT64 *)register_value)[0]; break;
+			}
+		}
+		else if( immediate_size > 0 )  /* cmp reg, imm */
+		{
+			fprintf(f, "[debug] cmp reg, imm\n");
+			switch(immediate_size)
+			{
+				case 8: v2 = (UINT64) ((UINT8 *)&immediate)[0]; break;
+				case 16: v2 = (UINT64) ((UINT16 *)&immediate)[0]; break;
+				case 32: v2 = (UINT64) ((UINT32 *)&immediate)[0]; break;
+				case 64: v2 = immediate; break;
+			}
+		}
+		
+		fprintf(f, "x=%lx, y=%lx\n", v1, v2);
 	}
 	else if( opcode == XED_ICLASS_ADD )
 	{
-		fprintf(f, "[add]\n");
+		fprintf(f, "x+reg/imm\n");
 	}
 	else if( opcode == XED_ICLASS_SUB )
 	{
-		fprintf(f, "[sub]\n");
+		fprintf(f, "x-reg/imm\n");
 	}
 	else if( opcode == XED_ICLASS_MUL )
 	{
-		fprintf(f, "[mul]\n");
+		fprintf(f, "x*reg/imm\n");
 	}
 	else if( opcode == XED_ICLASS_DIV )
 	{
-		fprintf(f, "[div]\n");
+		fprintf(f, "x/reg/imm\n");
 	}
 	else if( opcode == XED_ICLASS_AND )
 	{
-		fprintf(f, "[and]\n");
+		fprintf(f, "x & reg/imm\n");
 	}
 	else if( opcode == XED_ICLASS_OR )
 	{
-		fprintf(f, "[or]\n");
+		fprintf(f, "x | reg/imm\n");
 	}
 	else if( opcode == XED_ICLASS_XOR )
 	{
-		fprintf(f, "[xor]\n");
+		fprintf(f, "x ^ reg/imm\n");
 	}
 	else if( opcode == XED_ICLASS_NEG )
 	{
-		fprintf(f, "[neg]\n");
+		fprintf(f, "!x\n");
 	}
 	else if( opcode == XED_ICLASS_NOT )
 	{
-		fprintf(f, "[not]\n");
+		fprintf(f, "!x\n");
+	}
+	else if( opcode == XED_ICLASS_JB || opcode == XED_ICLASS_JL )
+	{
+		fprintf(f, "(x < y)\n");
+	}
+	else if( opcode == XED_ICLASS_JNB || opcode == XED_ICLASS_JNL )
+	{
+		fprintf(f, "(x >= y)\n");
+	}
+	else if( opcode == XED_ICLASS_JBE || opcode == XED_ICLASS_JLE )
+	{
+		fprintf(f, "(x <= y)\n");
+	}
+	else if( opcode == XED_ICLASS_JNBE || opcode == XED_ICLASS_JNLE )
+	{
+		fprintf(f, "(x > y)\n");
+	}
+	else if( opcode == XED_ICLASS_JZ )
+	{
+		fprintf(f, "(x == y)\n");
+	}
+	else if( opcode == XED_ICLASS_JNZ )
+	{
+		fprintf(f, "(x != y)\n");
+	}
+	else if( opcode == XED_ICLASS_JS )
+	{
+		fprintf(f, "(x < 0)\n");
+	}
+	else if( opcode == XED_ICLASS_JNS )
+	{
+		fprintf(f, "(x > 0)\n");
+	}
+	else if( opcode == XED_ICLASS_JO )
+	{
+		
+	}
+	else if( opcode == XED_ICLASS_JNO )
+	{
+		
+	}
+	else if( opcode == XED_ICLASS_JP )
+	{
+		fprintf(f, "(X%%2 == 0)\n");
+	}		
+	else if( opcode == XED_ICLASS_JNP )
+	{
+		fprintf(f, "(X%%2 != 0)\n");
+	}
+	else if( opcode == XED_ICLASS_JCXZ )
+	{
+		fprintf(f, "(ecx == 0)\n");
+	}
+	else if( opcode == XED_ICLASS_JECXZ )
+	{
+		fprintf(f, "(ecx != 0)\n");
+	}
+	else if( opcode == XED_ICLASS_JRCXZ )
+	{
+		fprintf(f, "(rcx == 0)\n");
 	}
 }
 
@@ -861,13 +757,13 @@ void track_operations(OPCODE opcode, ADDRINT addr)
 }
 
 unsigned int offset = -1; /* индекс в tainted_data */
-void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rregs_count, REG * rregs, UINT32 wregs_count, REG * wregs, UINT32 mems_count, UINT32 memop0_type, ADDRINT memop0, UINT32 memop1_type, ADDRINT memop1, UINT32 size)
+void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rregs_count, REG * rregs, UINT32 wregs_count, REG * wregs, UINT32 mems_count, UINT32 memop0_type, ADDRINT memop0, UINT32 memop1_type, ADDRINT memop1, UINT32 size, UINT64 immediate, UINT32 immediate_size)
 {
 	UINT32 i, j, is_spread = 0;
 	list <ADDRINT>::iterator addr_it;
 	ADDRINT taint_memory_read = 0, taint_memory_write = 0, taint_memory_ptr = 0;
-	ADDRINT register_value = 0;
 	REG reg = (REG) 0;
+	UINT8 register_value[128] = {0};
 	ins_count++;
 
 	if(ins_count % 1000000 == 0)
@@ -885,8 +781,12 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rr
 		if( check_reg_taint( rregs[i], threadid ) ) /* проверить - не помечен ли регистр */
 		{
 			is_spread = 1;
-			if( ( reg = get_full_reg(rregs[i]) ) != 0 )
-				register_value = PIN_GetContextReg(ctx, reg);
+			//if( ( reg = get_full_reg(rregs[i]) ) != 0 )
+			//if( ( reg = REG_FullRegName(rregs[i]) ) != 0 )
+			if( ( reg = rregs[i] ) != 0 )
+			{
+				PIN_GetContextRegval(ctx, reg, (UINT8 *)&register_value);
+			}
 			break;
 		}
 	}
@@ -952,7 +852,6 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rr
 			del_mem_taint( memop0 );
 		if(memop1_type == 2)
 			del_mem_taint( memop1 );
-		
 	}
 
 	if(memop0_type)
@@ -963,12 +862,12 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rr
 	if(is_spread || taint_memory_ptr)
 		if( (eip >= low_boundary && eip < high_boundary) || (low_boundary == 0 && high_boundary == 0) )
 		{
-			concolic(threadid, eip, ctx, opcode, rregs_count, rregs, wregs_count, wregs, mems_count, memop0_type, memop0, memop1_type, memop1, size);
+			concolic(threadid, eip, ctx, opcode, rregs_count, rregs, wregs_count, wregs, mems_count, memop0_type, memop0, memop1_type, memop1, size, immediate, immediate_size);
 			for(i = 0; i < size; i++)
 			{
 				track_operations(opcode, offset+i);
 			}
-			fprintf(f, "%s " HEX_FMT ":%u:%lu:", get_module_name(eip), eip - get_module_base(eip), threadid, ins_count);
+			fprintf(f, "[+] %s " HEX_FMT ":%u:%lu:", get_module_name(eip), eip - get_module_base(eip), threadid, ins_count);
 			if(taint_memory_read)
 			{
 				switch(size)
@@ -995,23 +894,50 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rr
 				switch(size)
 				{
 					case 8:
-						fprintf( f, " %s:*" HEX_FMT " = %08lX", get_reg_name(reg).c_str(), taint_memory_ptr, *((unsigned long int *)taint_memory_ptr) );
+						fprintf( f, " %s:*" HEX_FMT " = %08lX", REG_StringShort(reg).c_str(), taint_memory_ptr, *((unsigned long int *)taint_memory_ptr) );
 						break;
 					case 4:
-						fprintf( f, " %s:*" HEX_FMT " = %08X", get_reg_name(reg).c_str(), taint_memory_ptr, *((unsigned int *)taint_memory_ptr) );
+						fprintf( f, " %s:*" HEX_FMT " = %08X", REG_StringShort(reg).c_str(), taint_memory_ptr, *((unsigned int *)taint_memory_ptr) );
 						break;
 					case 2:
-						fprintf( f, " %s:*" HEX_FMT " = %04X", get_reg_name(reg).c_str(), taint_memory_ptr, *((unsigned short *)taint_memory_ptr) );
+						fprintf( f, " %s:*" HEX_FMT " = %04X", REG_StringShort(reg).c_str(), taint_memory_ptr, *((unsigned short *)taint_memory_ptr) );
 						break;
 					case 1:
-						fprintf( f, " %s:*" HEX_FMT " = %02X", get_reg_name(reg).c_str(), taint_memory_ptr, *((unsigned char *)taint_memory_ptr) );
+						fprintf( f, " %s:*" HEX_FMT " = %02X", REG_StringShort(reg).c_str(), taint_memory_ptr, *((unsigned char *)taint_memory_ptr) );
 						break;
 				}
 				telescope( *((int *)taint_memory_ptr), 1 );
 			}
 			else if(reg)
-				fprintf( f, " %s=" HEX_FMT2 ";", get_reg_name(reg).c_str(), register_value );
-
+			{
+				switch(REG_Size(reg))
+				{
+					case 1:
+						fprintf( f, " %s=%02X;", REG_StringShort(reg).c_str(), (UINT8)register_value[0] );
+						break;
+					case 2:
+						fprintf( f, " %s=%04X;", REG_StringShort(reg).c_str(), (UINT16)register_value[0] );
+						break;
+					case 4:
+						fprintf( f, " %s=%08X;", REG_StringShort(reg).c_str(), (UINT32)register_value[0] );
+						break;
+					#if defined(X64)
+						case 8:
+							fprintf( f, " %s=%016lX;", REG_StringShort(reg).c_str(), (UINT64)register_value[0] );
+							break;
+						case 16:
+							fprintf( f, " %s=%016lX%016lX;", REG_StringShort(reg).c_str(), ((UINT64 *)register_value)[1], ((UINT64 *)register_value)[0] );
+							break;
+					#else
+						case 8:
+							fprintf( f, " %s=%08X%08X;", REG_StringShort(reg).c_str(), ((UINT32 *)register_value)[1], ((UINT32 *)register_value)[0] );
+							break;
+						case 16:
+							fprintf( f, " %s=%08X%08X%08X%08X;", REG_StringShort(reg).c_str(), ((UINT32 *)register_value)[3], ((UINT32 *)register_value)[2], ((UINT32 *)register_value)[1], ((UINT32 *)register_value)[0] );
+							break;
+					#endif
+				}
+			}
 			fprintf(f, " [0x%x]\n", offset);
 			fflush(f);
 		}
@@ -1022,11 +948,13 @@ void ins_instrument(INS ins, VOID * v)
 {
 	REG *rregs, *wregs;
 	int rregs_count = 0, wregs_count = 0;
-	int i, mems_count = 0;
+	int i, mems_count, operands_count, immediate_size = 0;
+	UINT64 immediate = 0;
 	ADDRINT eip;
 	rregs_count = INS_MaxNumRRegs(ins);
 	wregs_count = INS_MaxNumWRegs(ins);
 	mems_count = INS_MemoryOperandCount(ins);
+	operands_count = INS_OperandCount(ins);
 	eip = INS_Address(ins);
 	rregs = (REG *) malloc( rregs_count * sizeof(REG) );
 	wregs = (REG *) malloc( wregs_count * sizeof(REG) );
@@ -1036,6 +964,15 @@ void ins_instrument(INS ins, VOID * v)
 		fprintf(f, "[!] error " HEX_FMT "\n", eip);
 		fflush(f);
 		return;
+	}
+
+	for( i = 0; i < operands_count; i++ )
+	{
+		if( INS_OperandIsImmediate(ins, i) )
+		{
+			immediate = INS_OperandImmediate(ins, i);
+			immediate_size = INS_OperandWidth(ins, i);
+		}
 	}
 
 	if( rregs_count || wregs_count || mems_count )
@@ -1061,7 +998,9 @@ void ins_instrument(INS ins, VOID * v)
 					IARG_UINT32, 0, 	/* mem_op0 value */
 					IARG_UINT32, 0, 	/* mem_op1 type */
 					IARG_UINT32, 0, 	/* mem_op1 value */
-					IARG_UINT32, 0,
+					IARG_UINT32, 0, 	/* mem_read_size */
+					IARG_UINT64, immediate,
+					IARG_UINT32, immediate_size,
 					IARG_END);
 					break;
 			case 1: INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR) taint,
@@ -1079,6 +1018,8 @@ void ins_instrument(INS ins, VOID * v)
 					IARG_UINT32, 0,
 					IARG_UINT32, 0,
 					IARG_MEMORYREAD_SIZE,
+					IARG_UINT64, immediate,
+					IARG_UINT32, immediate_size,
 					IARG_END);
 					break;
 			case 2: INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR) taint,
@@ -1096,6 +1037,8 @@ void ins_instrument(INS ins, VOID * v)
 					IARG_UINT32, INS_MemoryOperandIsWritten(ins, 1) ? 2 : 1,
 					IARG_MEMORYOP_EA, 1,
 					IARG_MEMORYREAD_SIZE,
+					IARG_UINT64, immediate,
+					IARG_UINT32, immediate_size,
 					IARG_END);
 					break;
 		}
@@ -1197,9 +1140,3 @@ int main(int argc, char ** argv)
 	PIN_StartProgram();
 	return 0;
 }
-
-/*
-TODO:
-	REG_XMM0
-	REG_ST0
-*/
