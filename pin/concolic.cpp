@@ -4,7 +4,7 @@
 #include <list>
 #include <map>
 
-#define VERSION "0.16"
+#define VERSION "0.20"
 #define MAX_TAINT_DATA 0x1000
 
 #if defined(__i386__) || defined(_WIN32)
@@ -26,13 +26,26 @@ typedef struct {
 } MODULE;
 
 typedef struct {
+	UINT64 rax;
+	UINT64 rcx;
+	UINT64 rdx;
+	UINT64 rbx;
+	UINT64 rbp;
+	UINT64 rsp;
+	UINT64 rsi;
+	UINT64 rdi;
+} Registers;
+
+typedef struct {
 	UINT64 value;
 	UINT32 size;
+	BOOL is_tainted;
 } Operand;
 
 typedef struct {
 	Operand operand1;
 	Operand operand2;
+	Registers registers;
 } Operands;
 
 list <ADDRINT> pages;
@@ -607,25 +620,42 @@ void find_tainted_data(ADDRINT mem)
 	fprintf(f, "\n");
 }
 
-void get_operands_value(UINT32 threadid, CONTEXT * ctx, UINT32 rregs_count, REG * rregs, UINT32 wregs_count, REG * wregs, UINT32 mems_count, UINT32 memop0_type, ADDRINT memop0, UINT32 memop1_type, ADDRINT memop1, UINT32 size, UINT64 immediate, UINT32 immediate_size)
+void get_operands_value(UINT32 threadid, CONTEXT * ctx, UINT32 rregs_count, REG * rregs, UINT32 wregs_count, REG * wregs, UINT32 mems_count, UINT32 memop0_type, ADDRINT memop0, UINT32 memop1_type, ADDRINT memop1, UINT32 size, UINT32 memop_index, UINT64 immediate, UINT32 immediate_size)
 {
 	UINT8 register_value[128] = {0};
-	PIN_GetContextRegval(ctx, rregs[0], (UINT8 *)&register_value);
-	operands[threadid].operand1.size = REG_Size(rregs[0]);
-	switch( operands[threadid].operand1.size )
+	list <ADDRINT>::iterator addr_it;
+	/* 
+	+	ins reg,[reg] 	mems_count==1 && rregs_count>1 && memop_index == 1
+	*	ins reg,[imm] 	mems_count==1 && rregs_count==1 && memop_index == 1
+	+	ins reg,reg 	mems_count==0 && rregs_count==2
+	+	ins reg,imm 	mems_count==0 && immediate_size>0
+	+	ins [reg],imm 	mems_count==1 && immediate_size>0 && memop_index == 0
+
+	+	ins [reg],reg 	mems_count==1 && rregs_count>1 && memop_index == 0
+	*	ins [imm],reg 	mems_count==1 && rregs_count==1 && memop_index == 0
+	*/
+	/* cmp byte [rax + rdx], cl */
+	if( mems_count == 1 && immediate_size == 0 && memop_index == 1 ) /* ins reg, [reg/imm] */
 	{
-		case 1: operands[threadid].operand1.value = ((UINT8 *)register_value)[0];
-				break;
-		case 2: operands[threadid].operand1.value = (UINT64) ((UINT16 *)register_value)[0];
-				break;
-		case 4: operands[threadid].operand1.value = (UINT64) ((UINT32 *)register_value)[0];
-				break;
-		case 8: operands[threadid].operand1.value = ((UINT64 *)register_value)[0];
-				break;
-	}
-	if( mems_count == 1 ) /* ins reg, [mem] */
-	{
-		fprintf(f, "[debug] ins reg, [mem]\n");
+		//fprintf(f, "[debug] ins reg, [mem] %d\n", memop_index);
+		PIN_GetContextRegval(ctx, rregs[0], (UINT8 *)&register_value);
+		operands[threadid].operand1.size = REG_Size(rregs[0]);
+		switch( operands[threadid].operand1.size )
+		{
+			case 1: operands[threadid].operand1.value = (UINT64) ((UINT8 *)register_value)[0];
+					break;
+			case 2: operands[threadid].operand1.value = (UINT64) ((UINT16 *)register_value)[0];
+					break;
+			case 4: operands[threadid].operand1.value = (UINT64) ((UINT32 *)register_value)[0];
+					break;
+			case 8: operands[threadid].operand1.value = ((UINT64 *)register_value)[0];
+					break;
+		}
+		if( check_reg_taint( rregs[0], threadid ) )
+			operands[threadid].operand1.is_tainted = true;
+		else
+			operands[threadid].operand1.is_tainted = false;
+
 		operands[threadid].operand2.size = size;
 		switch(size)
 		{
@@ -638,10 +668,35 @@ void get_operands_value(UINT32 threadid, CONTEXT * ctx, UINT32 rregs_count, REG 
 			case 8: operands[threadid].operand2.value = ((UINT64 *)memop0)[0];
 					break;
 		}
+		operands[threadid].operand2.is_tainted = false;
+		for( addr_it = tainted_addrs.begin(); addr_it != tainted_addrs.end(); addr_it++ )
+			if( *addr_it == memop0 )
+			{
+				operands[threadid].operand2.is_tainted = true;
+				break;
+			}
 	}
-	else if( rregs_count == 2 ) /* ins reg, reg */
+	else if( rregs_count == 2 && mems_count==0 ) /* ins reg, reg */
 	{
-		fprintf(f, "[debug] ins reg, reg\n");
+		//fprintf(f, "[debug] ins reg, reg %d\n", memop_index);
+		PIN_GetContextRegval(ctx, rregs[0], (UINT8 *)&register_value);
+		operands[threadid].operand1.size = REG_Size(rregs[0]);
+		switch( operands[threadid].operand1.size )
+		{
+			case 1: operands[threadid].operand1.value = (UINT64) ((UINT8 *)register_value)[0];
+					break;
+			case 2: operands[threadid].operand1.value = (UINT64) ((UINT16 *)register_value)[0];
+					break;
+			case 4: operands[threadid].operand1.value = (UINT64) ((UINT32 *)register_value)[0];
+					break;
+			case 8: operands[threadid].operand1.value = ((UINT64 *)register_value)[0];
+					break;
+		}
+		if( check_reg_taint( rregs[0], threadid ) )
+			operands[threadid].operand1.is_tainted = true;
+		else
+			operands[threadid].operand1.is_tainted = false;
+
 		PIN_GetContextRegval(ctx, rregs[1], (UINT8 *)&register_value);
 		operands[threadid].operand2.size = REG_Size(rregs[1]);
 		switch( operands[threadid].operand2.size )
@@ -655,10 +710,32 @@ void get_operands_value(UINT32 threadid, CONTEXT * ctx, UINT32 rregs_count, REG 
 			case 8: operands[threadid].operand2.value = ((UINT64 *)register_value)[0];
 					break;
 		}
+		if( check_reg_taint( rregs[1], threadid ) )
+			operands[threadid].operand2.is_tainted = true;
+		else
+			operands[threadid].operand2.is_tainted = false;
 	}
-	else if( immediate_size > 0 )  /* ins reg, imm */
+	else if( immediate_size > 0 && mems_count == 0 )  /* ins reg, imm */
 	{
-		fprintf(f, "[debug] ins reg, imm\n");
+		//fprintf(f, "[debug] ins reg, imm %d\n", memop_index);
+		PIN_GetContextRegval(ctx, rregs[0], (UINT8 *)&register_value);
+		operands[threadid].operand1.size = REG_Size(rregs[0]);
+		switch( operands[threadid].operand1.size )
+		{
+			case 1: operands[threadid].operand1.value = (UINT64) ((UINT8 *)register_value)[0];
+					break;
+			case 2: operands[threadid].operand1.value = (UINT64) ((UINT16 *)register_value)[0];
+					break;
+			case 4: operands[threadid].operand1.value = (UINT64) ((UINT32 *)register_value)[0];
+					break;
+			case 8: operands[threadid].operand1.value = ((UINT64 *)register_value)[0];
+					break;
+		}
+		if( check_reg_taint( rregs[0], threadid ) )
+			operands[threadid].operand1.is_tainted = true;
+		else
+			operands[threadid].operand1.is_tainted = false;
+
 		operands[threadid].operand2.size = immediate_size/8;
 		switch(immediate_size)
 		{
@@ -671,33 +748,144 @@ void get_operands_value(UINT32 threadid, CONTEXT * ctx, UINT32 rregs_count, REG 
 			case 64: operands[threadid].operand2.value = immediate;
 					break;
 		}
+		operands[threadid].operand2.is_tainted = false;
 	}
-	/* ins [mem], imm */
+	else if( mems_count == 1 && immediate_size > 0 && memop_index == 0 )  /* ins [reg], imm */
+	{
+		//fprintf(f, "[debug] ins [mem], imm %d\n", memop_index);
+		operands[threadid].operand1.size = size;
+		switch(size)
+		{
+			case 1: operands[threadid].operand1.value = (UINT64) ((UINT8 *)memop0)[0];
+					break;
+			case 2: operands[threadid].operand1.value = (UINT64) ((UINT16 *)memop0)[0];
+					break;
+			case 4: operands[threadid].operand1.value = (UINT64) ((UINT32 *)memop0)[0];
+					break;
+			case 8: operands[threadid].operand1.value = ((UINT64 *)memop0)[0];
+					break;
+		}
+		operands[threadid].operand1.is_tainted = false;
+		for( addr_it = tainted_addrs.begin(); addr_it != tainted_addrs.end(); addr_it++ )
+			if( *addr_it == memop0 )
+			{
+				operands[threadid].operand1.is_tainted = true;
+				break;
+			}
+
+		operands[threadid].operand2.size = immediate_size/8;
+		switch(immediate_size)
+		{
+			case 8: operands[threadid].operand2.value = (UINT64) ((UINT8 *)&immediate)[0];
+					break;
+			case 16: operands[threadid].operand2.value = (UINT64) ((UINT16 *)&immediate)[0];
+					break;
+			case 32: operands[threadid].operand2.value = (UINT64) ((UINT32 *)&immediate)[0];
+					break;
+			case 64: operands[threadid].operand2.value = immediate;
+					break;
+		}
+		operands[threadid].operand2.is_tainted = false;
+	}
+	else if( mems_count == 1 && memop_index == 0 )  /* ins [reg/mem], reg */
+	{
+		//fprintf(f, "[debug] ins [mem], reg %d\n", memop_index);
+		operands[threadid].operand1.size = size;
+		switch(size)
+		{
+			case 1: operands[threadid].operand1.value = (UINT64) ((UINT8 *)memop0)[0];
+					break;
+			case 2: operands[threadid].operand1.value = (UINT64) ((UINT16 *)memop0)[0];
+					break;
+			case 4: operands[threadid].operand1.value = (UINT64) ((UINT32 *)memop0)[0];
+					break;
+			case 8: operands[threadid].operand1.value = ((UINT64 *)memop0)[0];
+					break;
+		}
+		operands[threadid].operand1.is_tainted = false;
+		for( addr_it = tainted_addrs.begin(); addr_it != tainted_addrs.end(); addr_it++ )
+			if( *addr_it == memop0 )
+			{
+				operands[threadid].operand1.is_tainted = true;
+				break;
+			}
+
+		PIN_GetContextRegval(ctx, rregs[1], (UINT8 *)&register_value);
+		operands[threadid].operand2.size = REG_Size(rregs[1]);
+		switch( operands[threadid].operand2.size )
+		{
+			case 1: operands[threadid].operand2.value = (UINT64) ((UINT8 *)register_value)[0];
+					break;
+			case 2: operands[threadid].operand2.value = (UINT64) ((UINT16 *)register_value)[0];
+					break;
+			case 4: operands[threadid].operand2.value = (UINT64) ((UINT32 *)register_value)[0];
+					break;
+			case 8: operands[threadid].operand2.value = ((UINT64 *)register_value)[0];
+					break;
+		}
+		if( check_reg_taint( rregs[1], threadid ) )
+			operands[threadid].operand2.is_tainted = true;
+		else
+			operands[threadid].operand2.is_tainted = false;
+	}
 }
 
-void concolic(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rregs_count, REG * rregs, UINT32 wregs_count, REG * wregs, UINT32 mems_count, UINT32 memop0_type, ADDRINT memop0, UINT32 memop1_type, ADDRINT memop1, UINT32 size, UINT64 immediate, UINT32 immediate_size)
+void concolic(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rregs_count, REG * rregs, UINT32 wregs_count, REG * wregs, UINT32 mems_count, UINT32 memop0_type, ADDRINT memop0, UINT32 memop1_type, ADDRINT memop1, UINT32 size, UINT32 memop_index, UINT64 immediate, UINT32 immediate_size)
 {
 	if(XED_ICLASS_JB > opcode || opcode > XED_ICLASS_JZ)
-		get_operands_value(threadid, ctx, rregs_count, rregs, wregs_count, wregs, mems_count, memop0_type, memop0, memop1_type, memop1, size, immediate, immediate_size);
+		get_operands_value(threadid, ctx, rregs_count, rregs, wregs_count, wregs, mems_count, memop0_type, memop0, memop1_type, memop1, size, memop_index, immediate, immediate_size);
 
-	if( ( opcode == XED_ICLASS_CMP) || ( opcode == XED_ICLASS_TEST ) )
+	if( ( opcode == XED_ICLASS_CMP) )
 	{
-		fprintf(f, "(%d)", operands[threadid].operand1.size);
-		switch(operands[threadid].operand1.size)
+		if( operands[threadid].operand1.is_tainted )
 		{
-			case 1: fprintf(f, "x=%x, ", (UINT8)operands[threadid].operand1.value); break;
-			case 2: fprintf(f, "x=%x, ", (UINT16)operands[threadid].operand1.value); break;
-			case 4: fprintf(f, "x=%x, ", (UINT32)operands[threadid].operand1.value); break;
-			case 8: fprintf(f, "x=%lx, ", (UINT64)operands[threadid].operand1.value); break;
+			fprintf(f, "x=SYM, ");
 		}
-		fprintf(f, "(%d)", operands[threadid].operand2.size);
-		switch(operands[threadid].operand2.size)
+		else
 		{
-			case 1: fprintf(f, "y=%x\n", (UINT8)operands[threadid].operand2.value); break;
-			case 2: fprintf(f, "y=%x\n", (UINT16)operands[threadid].operand2.value); break;
-			case 4: fprintf(f, "y=%x\n", (UINT32)operands[threadid].operand2.value); break;
-			case 8: fprintf(f, "y=%lx\n", (UINT64)operands[threadid].operand2.value); break;
+			switch(operands[threadid].operand1.size)
+			{
+				case 1: fprintf(f, "x=%02x, ", (UINT8)operands[threadid].operand1.value); break;
+				case 2: fprintf(f, "x=%04x, ", (UINT16)operands[threadid].operand1.value); break;
+				case 4: fprintf(f, "x=%08x, ", (UINT32)operands[threadid].operand1.value); break;
+				case 8: fprintf(f, "x=%016lx, ", (UINT64)operands[threadid].operand1.value); break;
+			}
 		}
+		if( operands[threadid].operand2.is_tainted )
+		{
+			fprintf(f, "y=SYM\n");
+		}
+		else
+		{
+			switch(operands[threadid].operand2.size)
+			{
+				case 1: fprintf(f, "y=%02x\n", (UINT8)operands[threadid].operand2.value); break;
+				case 2: fprintf(f, "y=%04x\n", (UINT16)operands[threadid].operand2.value); break;
+				case 4: fprintf(f, "y=%08x\n", (UINT32)operands[threadid].operand2.value); break;
+				case 8: fprintf(f, "y=%016lx\n", (UINT64)operands[threadid].operand2.value); break;
+			}
+		}
+	}
+	else if( opcode == XED_ICLASS_TEST )
+	{
+		if( operands[threadid].operand1.is_tainted )
+		{
+			fprintf(f, "x=SYM, ");
+		}
+		else
+		{
+			switch(operands[threadid].operand1.size)
+			{
+				case 1: fprintf(f, "x=%02x, ", (UINT8)operands[threadid].operand1.value); break;
+				case 2: fprintf(f, "x=%04x, ", (UINT16)operands[threadid].operand1.value); break;
+				case 4: fprintf(f, "x=%08x, ", (UINT32)operands[threadid].operand1.value); break;
+				case 8: fprintf(f, "x=%016lx, ", (UINT64)operands[threadid].operand1.value); break;
+			}
+		}
+		operands[threadid].operand2.value = 0;
+		operands[threadid].operand2.size = 1;
+		operands[threadid].operand2.is_tainted = false;
+		fprintf(f, "y=0\n");
 	}
 	else if( opcode == XED_ICLASS_ADD )
 	{
@@ -727,6 +915,14 @@ void concolic(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32
 	{
 		fprintf(f, "%x =^ %x\n", (UINT8)operands[threadid].operand1.value, (UINT8)operands[threadid].operand2.value);
 	}
+	else if( opcode == XED_ICLASS_SHL )
+	{
+		fprintf(f, "%x <<= %x\n", (UINT8)operands[threadid].operand1.value, (UINT8)operands[threadid].operand2.value);	
+	}
+	else if( opcode == XED_ICLASS_SHR )
+	{
+		fprintf(f, "%x >>= %x\n", (UINT8)operands[threadid].operand1.value, (UINT8)operands[threadid].operand2.value);
+	}
 	else if( opcode == XED_ICLASS_NEG )
 	{
 		fprintf(f, "!%x\n", (UINT8)operands[threadid].operand1.value);
@@ -735,37 +931,156 @@ void concolic(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32
 	{
 		fprintf(f, "!%x\n", (UINT8)operands[threadid].operand1.value);
 	}
+
 	else if( opcode == XED_ICLASS_JB || opcode == XED_ICLASS_JL )
 	{
-		fprintf(f, "(%x < %x)\n", (UINT8)operands[threadid].operand1.value, (UINT8)operands[threadid].operand2.value);
+		switch(operands[threadid].operand1.size)
+		{
+			case 1: fprintf(f, "%x", (UINT8)operands[threadid].operand1.value); break;
+			case 2: fprintf(f, "%x", (UINT16)operands[threadid].operand1.value); break;
+			case 4: fprintf(f, "%x", (UINT32)operands[threadid].operand1.value); break;
+			case 8: fprintf(f, "%lx", (UINT64)operands[threadid].operand1.value); break;
+		}
+		fprintf(f, " < ");
+		switch(operands[threadid].operand2.size)
+		{
+			case 1: fprintf(f, "%x", (UINT8)operands[threadid].operand2.value); break;
+			case 2: fprintf(f, "%x", (UINT16)operands[threadid].operand2.value); break;
+			case 4: fprintf(f, "%x", (UINT32)operands[threadid].operand2.value); break;
+			case 8: fprintf(f, "%lx", (UINT64)operands[threadid].operand2.value); break;
+		}
+		fprintf(f, "\n");
 	}
 	else if( opcode == XED_ICLASS_JNB || opcode == XED_ICLASS_JNL )
 	{
-		fprintf(f, "(%x >= %x)\n", (UINT8)operands[threadid].operand1.value, (UINT8)operands[threadid].operand2.value);
+		switch(operands[threadid].operand1.size)
+		{
+			case 1: fprintf(f, "%x", (UINT8)operands[threadid].operand1.value); break;
+			case 2: fprintf(f, "%x", (UINT16)operands[threadid].operand1.value); break;
+			case 4: fprintf(f, "%x", (UINT32)operands[threadid].operand1.value); break;
+			case 8: fprintf(f, "%lx", (UINT64)operands[threadid].operand1.value); break;
+		}
+		fprintf(f, " >= ");
+		switch(operands[threadid].operand2.size)
+		{
+			case 1: fprintf(f, "%x", (UINT8)operands[threadid].operand2.value); break;
+			case 2: fprintf(f, "%x", (UINT16)operands[threadid].operand2.value); break;
+			case 4: fprintf(f, "%x", (UINT32)operands[threadid].operand2.value); break;
+			case 8: fprintf(f, "%lx", (UINT64)operands[threadid].operand2.value); break;
+		}
+		fprintf(f, "\n");
 	}
 	else if( opcode == XED_ICLASS_JBE || opcode == XED_ICLASS_JLE )
 	{
-		fprintf(f, "(%x <= %x)\n", (UINT8)operands[threadid].operand1.value, (UINT8)operands[threadid].operand2.value);
+		switch(operands[threadid].operand1.size)
+		{
+			case 1: fprintf(f, "%x", (UINT8)operands[threadid].operand1.value); break;
+			case 2: fprintf(f, "%x", (UINT16)operands[threadid].operand1.value); break;
+			case 4: fprintf(f, "%x", (UINT32)operands[threadid].operand1.value); break;
+			case 8: fprintf(f, "%lx", (UINT64)operands[threadid].operand1.value); break;
+		}
+		fprintf(f, " <= ");
+		switch(operands[threadid].operand2.size)
+		{
+			case 1: fprintf(f, "%x", (UINT8)operands[threadid].operand2.value); break;
+			case 2: fprintf(f, "%x", (UINT16)operands[threadid].operand2.value); break;
+			case 4: fprintf(f, "%x", (UINT32)operands[threadid].operand2.value); break;
+			case 8: fprintf(f, "%lx", (UINT64)operands[threadid].operand2.value); break;
+		}
+		fprintf(f, "\n");
 	}
 	else if( opcode == XED_ICLASS_JNBE || opcode == XED_ICLASS_JNLE )
 	{
-		fprintf(f, "(%x > %x)\n", (UINT8)operands[threadid].operand1.value, (UINT8)operands[threadid].operand2.value);
+		switch(operands[threadid].operand1.size)
+		{
+			case 1: fprintf(f, "%x", (UINT8)operands[threadid].operand1.value); break;
+			case 2: fprintf(f, "%x", (UINT16)operands[threadid].operand1.value); break;
+			case 4: fprintf(f, "%x", (UINT32)operands[threadid].operand1.value); break;
+			case 8: fprintf(f, "%lx", (UINT64)operands[threadid].operand1.value); break;
+		}
+		fprintf(f, " > ");
+		switch(operands[threadid].operand2.size)
+		{
+			case 1: fprintf(f, "%x", (UINT8)operands[threadid].operand2.value); break;
+			case 2: fprintf(f, "%x", (UINT16)operands[threadid].operand2.value); break;
+			case 4: fprintf(f, "%x", (UINT32)operands[threadid].operand2.value); break;
+			case 8: fprintf(f, "%lx", (UINT64)operands[threadid].operand2.value); break;
+		}
+		fprintf(f, "\n");
 	}
 	else if( opcode == XED_ICLASS_JZ )
 	{
-		fprintf(f, "(%x == %x)\n", (UINT8)operands[threadid].operand1.value, (UINT8)operands[threadid].operand2.value);
+		if( operands[threadid].operand1.is_tainted )
+		{
+			fprintf(f, "SYM");
+		}
+		else
+		{
+			switch(operands[threadid].operand1.size)
+			{
+				case 1: fprintf(f, "%x", (UINT8)operands[threadid].operand1.value); break;
+				case 2: fprintf(f, "%x", (UINT16)operands[threadid].operand1.value); break;
+				case 4: fprintf(f, "%x", (UINT32)operands[threadid].operand1.value); break;
+				case 8: fprintf(f, "%lx", (UINT64)operands[threadid].operand1.value); break;
+			}
+		}
+		fprintf(f, " == ");
+		if( operands[threadid].operand2.is_tainted )
+		{
+			fprintf(f, "SYM");
+		}
+		else
+		{
+			switch(operands[threadid].operand2.size)
+			{
+				case 1: fprintf(f, "%x", (UINT8)operands[threadid].operand2.value); break;
+				case 2: fprintf(f, "%x", (UINT16)operands[threadid].operand2.value); break;
+				case 4: fprintf(f, "%x", (UINT32)operands[threadid].operand2.value); break;
+				case 8: fprintf(f, "%lx", (UINT64)operands[threadid].operand2.value); break;
+			}
+		}
+		fprintf(f, "\n");
 	}
 	else if( opcode == XED_ICLASS_JNZ )
 	{
-		fprintf(f, "(%x != %x)\n", (UINT8)operands[threadid].operand1.value, (UINT8)operands[threadid].operand2.value);
+		switch(operands[threadid].operand1.size)
+		{
+			case 1: fprintf(f, "%x", (UINT8)operands[threadid].operand1.value); break;
+			case 2: fprintf(f, "%x", (UINT16)operands[threadid].operand1.value); break;
+			case 4: fprintf(f, "%x", (UINT32)operands[threadid].operand1.value); break;
+			case 8: fprintf(f, "%lx", (UINT64)operands[threadid].operand1.value); break;
+		}
+		fprintf(f, " != ");
+		switch(operands[threadid].operand2.size)
+		{
+			case 1: fprintf(f, "%x", (UINT8)operands[threadid].operand2.value); break;
+			case 2: fprintf(f, "%x", (UINT16)operands[threadid].operand2.value); break;
+			case 4: fprintf(f, "%x", (UINT32)operands[threadid].operand2.value); break;
+			case 8: fprintf(f, "%lx", (UINT64)operands[threadid].operand2.value); break;
+		}
+		fprintf(f, "\n");
 	}
 	else if( opcode == XED_ICLASS_JS )
 	{
-		fprintf(f, "(%x < 0)\n", (UINT8)operands[threadid].operand1.value);
+		switch(operands[threadid].operand1.size)
+		{
+			case 1: fprintf(f, "%x", (UINT8)operands[threadid].operand1.value); break;
+			case 2: fprintf(f, "%x", (UINT16)operands[threadid].operand1.value); break;
+			case 4: fprintf(f, "%x", (UINT32)operands[threadid].operand1.value); break;
+			case 8: fprintf(f, "%lx", (UINT64)operands[threadid].operand1.value); break;
+		}
+		fprintf(f, " < 0\n");
 	}
 	else if( opcode == XED_ICLASS_JNS )
 	{
-		fprintf(f, "(%x > 0)\n", (UINT8)operands[threadid].operand1.value);
+		switch(operands[threadid].operand1.size)
+		{
+			case 1: fprintf(f, "%x", (UINT8)operands[threadid].operand1.value); break;
+			case 2: fprintf(f, "%x", (UINT16)operands[threadid].operand1.value); break;
+			case 4: fprintf(f, "%x", (UINT32)operands[threadid].operand1.value); break;
+			case 8: fprintf(f, "%lx", (UINT64)operands[threadid].operand1.value); break;
+		}
+		fprintf(f, " > 0\n");
 	}
 	else if( opcode == XED_ICLASS_JO )
 	{
@@ -777,11 +1092,25 @@ void concolic(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32
 	}
 	else if( opcode == XED_ICLASS_JP )
 	{
-		fprintf(f, "(%x%%2 == 0)\n", (UINT16)operands[threadid].operand1.value);
+		switch(operands[threadid].operand1.size)
+		{
+			case 1: fprintf(f, "%x", (UINT8)operands[threadid].operand1.value); break;
+			case 2: fprintf(f, "%x", (UINT16)operands[threadid].operand1.value); break;
+			case 4: fprintf(f, "%x", (UINT32)operands[threadid].operand1.value); break;
+			case 8: fprintf(f, "%lx", (UINT64)operands[threadid].operand1.value); break;
+		}
+		fprintf(f, "%%2 == 0\n");
 	}		
 	else if( opcode == XED_ICLASS_JNP )
 	{
-		fprintf(f, "(%x%%2 != 0)\n", (UINT32)operands[threadid].operand1.value);
+		switch(operands[threadid].operand1.size)
+		{
+			case 1: fprintf(f, "%x", (UINT8)operands[threadid].operand1.value); break;
+			case 2: fprintf(f, "%x", (UINT16)operands[threadid].operand1.value); break;
+			case 4: fprintf(f, "%x", (UINT32)operands[threadid].operand1.value); break;
+			case 8: fprintf(f, "%lx", (UINT64)operands[threadid].operand1.value); break;
+		}
+		fprintf(f, "%%2 != 0\n");
 	}
 	else if( opcode == XED_ICLASS_JCXZ )
 	{
@@ -807,7 +1136,7 @@ void track_operations(OPCODE opcode, ADDRINT addr)
 }
 
 unsigned int offset = -1; /* индекс в tainted_data */
-void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rregs_count, REG * rregs, UINT32 wregs_count, REG * wregs, UINT32 mems_count, UINT32 memop0_type, ADDRINT memop0, UINT32 memop1_type, ADDRINT memop1, UINT32 size, UINT64 immediate, UINT32 immediate_size)
+void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rregs_count, REG * rregs, UINT32 wregs_count, REG * wregs, UINT32 mems_count, UINT32 memop0_type, ADDRINT memop0, UINT32 memop1_type, ADDRINT memop1, UINT32 size, UINT32 memop_index, UINT64 immediate, UINT32 immediate_size)
 {
 	UINT32 i, j, is_spread = 0;
 	list <ADDRINT>::iterator addr_it;
@@ -821,6 +1150,9 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rr
 		fprintf(f, "[*] %lu\n", ins_count);
 		fflush(f);
 	}
+
+	if( opcode == XED_ICLASS_XOR && rregs_count > 1 && rregs[0] == rregs[1] )
+		return;
 
 	if(memop0_type == 1) find_tainted_data(memop0);
 	if(memop1_type == 1) find_tainted_data(memop1);
@@ -912,6 +1244,7 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rr
 	if(is_spread || taint_memory_ptr)
 		if( (eip >= low_boundary && eip < high_boundary) || (low_boundary == 0 && high_boundary == 0) )
 		{
+			concolic(threadid, eip, ctx, opcode, rregs_count, rregs, wregs_count, wregs, mems_count, memop0_type, memop0, memop1_type, memop1, size, memop_index, immediate, immediate_size);
 			for(i = 0; i < size; i++)
 			{
 				track_operations(opcode, offset+i);
@@ -989,7 +1322,6 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rr
 			}
 			fprintf(f, " [0x%x]\n", offset);
 			fflush(f);
-			concolic(threadid, eip, ctx, opcode, rregs_count, rregs, wregs_count, wregs, mems_count, memop0_type, memop0, memop1_type, memop1, size, immediate, immediate_size);
 		}
 }
 
@@ -1049,8 +1381,9 @@ void ins_instrument(INS ins, VOID * v)
 					IARG_UINT32, 0, 	/* mem_op1 type */
 					IARG_UINT32, 0, 	/* mem_op1 value */
 					IARG_UINT32, 0, 	/* mem_read_size */
+					IARG_UINT32, 0, 	/* mem_op1_index */
 					IARG_UINT64, immediate,
-					IARG_UINT32, immediate_size,
+					IARG_UINT32, immediate_size,					
 					IARG_END);
 					break;
 			case 1: INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR) taint,
@@ -1068,6 +1401,7 @@ void ins_instrument(INS ins, VOID * v)
 					IARG_UINT32, 0,
 					IARG_UINT32, 0,
 					IARG_MEMORYREAD_SIZE,
+					IARG_UINT32, INS_MemoryOperandIndexToOperandIndex(ins, 0),
 					IARG_UINT64, immediate,
 					IARG_UINT32, immediate_size,
 					IARG_END);
@@ -1087,6 +1421,7 @@ void ins_instrument(INS ins, VOID * v)
 					IARG_UINT32, INS_MemoryOperandIsWritten(ins, 1) ? 2 : 1,
 					IARG_MEMORYOP_EA, 1,
 					IARG_MEMORYREAD_SIZE,
+					IARG_UINT32, INS_MemoryOperandIndexToOperandIndex(ins, 0),
 					IARG_UINT64, immediate,
 					IARG_UINT32, immediate_size,
 					IARG_END);
