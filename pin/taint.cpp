@@ -3,7 +3,7 @@
 #include <list>
 #include <map>
 
-#define VERSION "0.50"
+#define VERSION "0.51"
 #define MAX_TAINT_DATA 0x1000
 
 #if defined(__i386__) || defined(_WIN32)
@@ -604,6 +604,7 @@ void track_operations(OPCODE opcode, ADDRINT addr)
 		tainted_operations[addr] = 1;
 }
 
+/* xor eax, eax */
 unsigned int offset = -1; /* индекс в tainted_data */
 void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rregs_count, REG * rregs, UINT32 wregs_count, REG * wregs, UINT32 mems_count, UINT32 memop0_type, ADDRINT memop0, UINT32 memop1_type, ADDRINT memop1, UINT32 size)
 {
@@ -619,6 +620,9 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rr
 		fprintf(f, "[*] %lu\n", ins_count);
 		fflush(f);
 	}
+
+	if( opcode == XED_ICLASS_XOR && rregs_count > 1 && rregs[0] == rregs[1] )
+		return;
 
 	if(memop0_type == 1) find_tainted_data(memop0);
 	if(memop1_type == 1) find_tainted_data(memop1);
