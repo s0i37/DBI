@@ -5,7 +5,7 @@
 #include <map>
 #include <sstream>
 
-#define VERSION "0.21"
+#define VERSION "0.22"
 #define MAX_TAINT_DATA 0x1000
 
 #if defined(__i386__) || defined(_WIN32)
@@ -51,6 +51,7 @@ typedef struct {
 
 typedef struct {
 	string equation;
+	string arithmetic;
 } Symbolic;
 
 list <ADDRINT> pages;
@@ -61,6 +62,12 @@ map <ADDRINT, unsigned int> tainted_operations;
 map < int, list <REG> > tainted_regs;
 map < int, Operands > operands;
 map < int, Symbolic > symbolic_bytes;
+
+z3::context   *z3Context;
+z3::expr      *z3Var;
+z3::solver    *z3Solver;
+z3::expr      *z3Equation;
+z3::model     *z3Model;
 
 string need_module;
 ADDRINT low_boundary;
@@ -897,37 +904,53 @@ void concolic(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32
 	}
 	else if( opcode == XED_ICLASS_ADD )
 	{
-		equation << symbolic_bytes[offset].equation << "&";
-		if( operands[threadid].operand1.is_tainted )
-			equation << "(X" << offset;
+		equation << "(";
+		if(symbolic_bytes[offset].arithmetic == "")
+		{
+			if( operands[threadid].operand1.is_tainted )
+				equation << "X" << offset;
+			else
+			{
+				equation << "0x" << hex << operands[threadid].operand1.value;
+			}
+		}
 		else
 		{
-			equation << "(0x" << hex << operands[threadid].operand1.value;
+			equation << symbolic_bytes[offset].arithmetic;
 		}
 		equation << " + ";
 		if( operands[threadid].operand2.is_tainted )
-			equation << "X%d" << offset << ")";
+			equation << "X%d" << offset;
 		else
-			equation << "0x" << hex << operands[threadid].operand2.value << ")";
-		symbolic_bytes[offset].equation = equation.str();
-		fprintf(f, "%s\n", symbolic_bytes[offset].equation.c_str());
+			equation << "0x" << hex << operands[threadid].operand2.value;
+		equation << ")";
+		symbolic_bytes[offset].arithmetic = equation.str();
+		fprintf(f, "%s\n", symbolic_bytes[offset].arithmetic.c_str());
 	}
 	else if( opcode == XED_ICLASS_SUB )
 	{
-		equation << symbolic_bytes[offset].equation << "&";
-		if( operands[threadid].operand1.is_tainted )
-			equation << "(X" << offset;
+		equation << "(";
+		if(symbolic_bytes[offset].arithmetic == "")
+		{
+			if( operands[threadid].operand1.is_tainted )
+				equation << "X" << offset;
+			else
+			{
+				equation << "0x" << hex << operands[threadid].operand1.value;
+			}
+		}
 		else
 		{
-			equation << "(0x" << hex << operands[threadid].operand1.value;
+			equation << symbolic_bytes[offset].arithmetic;
 		}
 		equation << " - ";
 		if( operands[threadid].operand2.is_tainted )
-			equation << "X%d" << offset << ")";
+			equation << "X%d" << offset;
 		else
-			equation << "0x" << hex << operands[threadid].operand2.value << ")";
-		symbolic_bytes[offset].equation = equation.str();
-		fprintf(f, "%s\n", symbolic_bytes[offset].equation.c_str());
+			equation << "0x" << hex << operands[threadid].operand2.value;
+		equation << ")";
+		symbolic_bytes[offset].arithmetic = equation.str();
+		fprintf(f, "%s\n", symbolic_bytes[offset].arithmetic.c_str());
 	}
 	else if( opcode == XED_ICLASS_MUL )
 	{
@@ -939,88 +962,128 @@ void concolic(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32
 	}
 	else if( opcode == XED_ICLASS_AND )
 	{
-		equation << symbolic_bytes[offset].equation << "&";
-		if( operands[threadid].operand1.is_tainted )
-			equation << "(X" << offset;
+		equation << "(";
+		if(symbolic_bytes[offset].arithmetic == "")
+		{
+			if( operands[threadid].operand1.is_tainted )
+				equation << "X" << offset;
+			else
+			{
+				equation << "0x" << hex << operands[threadid].operand1.value;
+			}
+		}
 		else
 		{
-			equation << "(0x" << hex << operands[threadid].operand1.value;
+			equation << symbolic_bytes[offset].arithmetic;
 		}
 		equation << " & ";
 		if( operands[threadid].operand2.is_tainted )
-			equation << "X%d" << offset << ")";
+			equation << "X%d" << offset;
 		else
-			equation << "0x" << hex << operands[threadid].operand2.value << ")";
-		symbolic_bytes[offset].equation = equation.str();
-		fprintf(f, "%s\n", symbolic_bytes[offset].equation.c_str());
+			equation << "0x" << hex << operands[threadid].operand2.value;
+		equation << ")";
+		symbolic_bytes[offset].arithmetic = equation.str();
+		fprintf(f, "%s\n", symbolic_bytes[offset].arithmetic.c_str());
 	}
 	else if( opcode == XED_ICLASS_OR )
 	{
-		equation << symbolic_bytes[offset].equation << "&";
-		if( operands[threadid].operand1.is_tainted )
-			equation << "(X" << offset;
+		equation << "(";
+		if(symbolic_bytes[offset].arithmetic == "")
+		{
+			if( operands[threadid].operand1.is_tainted )
+				equation << "X" << offset;
+			else
+			{
+				equation << "0x" << hex << operands[threadid].operand1.value;
+			}
+		}
 		else
 		{
-			equation << "(0x" << hex << operands[threadid].operand1.value;
+			equation << symbolic_bytes[offset].arithmetic;
 		}
 		equation << " | ";
 		if( operands[threadid].operand2.is_tainted )
-			equation << "X%d" << offset << ")";
+			equation << "X%d" << offset;
 		else
-			equation << "0x" << hex << operands[threadid].operand2.value << ")";
-		symbolic_bytes[offset].equation = equation.str();
-		fprintf(f, "%s\n", symbolic_bytes[offset].equation.c_str());
+			equation << "0x" << hex << operands[threadid].operand2.value;
+		equation << ")";
+		symbolic_bytes[offset].arithmetic = equation.str();
+		fprintf(f, "%s\n", symbolic_bytes[offset].arithmetic.c_str());
 	}
 	else if( opcode == XED_ICLASS_XOR )
 	{
-		equation << symbolic_bytes[offset].equation << "&";
-		if( operands[threadid].operand1.is_tainted )
-			equation << "(X" << offset;
+		equation << "(";
+		if(symbolic_bytes[offset].arithmetic == "")
+		{
+			if( operands[threadid].operand1.is_tainted )
+				equation << "X" << offset;
+			else
+			{
+				equation << "0x" << hex << operands[threadid].operand1.value;
+			}
+		}
 		else
 		{
-			equation << "(0x" << hex << operands[threadid].operand1.value;
+			equation << symbolic_bytes[offset].arithmetic;
 		}
 		equation << " ^ ";
 		if( operands[threadid].operand2.is_tainted )
-			equation << "X%d" << offset << ")";
+			equation << "X%d" << offset;
 		else
-			equation << "0x" << hex << operands[threadid].operand2.value << ")";
-		symbolic_bytes[offset].equation = equation.str();
-		fprintf(f, "%s\n", symbolic_bytes[offset].equation.c_str());
+			equation << "0x" << hex << operands[threadid].operand2.value;
+		equation << ")";
+		symbolic_bytes[offset].arithmetic = equation.str();
+		fprintf(f, "%s\n", symbolic_bytes[offset].arithmetic.c_str());
 	}
 	else if( opcode == XED_ICLASS_SHL )
 	{
-		equation << symbolic_bytes[offset].equation << "&";
-		if( operands[threadid].operand1.is_tainted )
-			equation << "(X" << offset;
+		equation << "(";
+		if(symbolic_bytes[offset].arithmetic == "")
+		{
+			if( operands[threadid].operand1.is_tainted )
+				equation << "X" << offset;
+			else
+			{
+				equation << "0x" << hex << operands[threadid].operand1.value;
+			}
+		}
 		else
 		{
-			equation << "(0x" << hex << operands[threadid].operand1.value;
+			equation << symbolic_bytes[offset].arithmetic;
 		}
 		equation << " << ";
 		if( operands[threadid].operand2.is_tainted )
-			equation << "X%d" << offset << ")";
+			equation << "X%d" << offset;
 		else
-			equation << "0x" << hex << operands[threadid].operand2.value << ")";
-		symbolic_bytes[offset].equation = equation.str();
-		fprintf(f, "%s\n", symbolic_bytes[offset].equation.c_str());
+			equation << "0x" << hex << operands[threadid].operand2.value;
+		equation << ")";
+		symbolic_bytes[offset].arithmetic = equation.str();
+		fprintf(f, "%s\n", symbolic_bytes[offset].arithmetic.c_str());
 	}
 	else if( opcode == XED_ICLASS_SHR )
 	{
-		equation << symbolic_bytes[offset].equation << "&";
-		if( operands[threadid].operand1.is_tainted )
-			equation << "(X" << offset;
+		equation << "(";
+		if(symbolic_bytes[offset].arithmetic == "")
+		{
+			if( operands[threadid].operand1.is_tainted )
+				equation << "X" << offset;
+			else
+			{
+				equation << "0x" << hex << operands[threadid].operand1.value;
+			}
+		}
 		else
 		{
-			equation << "(0x" << hex << operands[threadid].operand1.value;
+			equation << symbolic_bytes[offset].arithmetic;
 		}
 		equation << " >> ";
 		if( operands[threadid].operand2.is_tainted )
-			equation << "X%d" << offset << ")";
+			equation << "X%d" << offset;
 		else
-			equation << "0x" << hex << operands[threadid].operand2.value << ")";
-		symbolic_bytes[offset].equation = equation.str();
-		fprintf(f, "%s\n", symbolic_bytes[offset].equation.c_str());
+			equation << "0x" << hex << operands[threadid].operand2.value;
+		equation << ")";
+		symbolic_bytes[offset].arithmetic = equation.str();
+		fprintf(f, "%s\n", symbolic_bytes[offset].arithmetic.c_str());
 	}
 	else if( opcode == XED_ICLASS_NEG )
 	{
@@ -1033,69 +1096,101 @@ void concolic(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32
 
 	else if( opcode == XED_ICLASS_JB || opcode == XED_ICLASS_JL )
 	{
-		equation << symbolic_bytes[offset].equation << "&";
-		if( operands[threadid].operand1.is_tainted )
-			equation << "(X" << offset;
+		equation << symbolic_bytes[offset].equation << "&(";
+		if( symbolic_bytes[offset].arithmetic == "" )
+		{
+			if( operands[threadid].operand1.is_tainted )
+				equation << "X" << offset;
+			else
+				equation << "0x" << hex << operands[threadid].operand1.value;
+		}
 		else
 		{
-			equation << "(0x" << hex << operands[threadid].operand1.value;
+			equation << symbolic_bytes[offset].arithmetic;
+			symbolic_bytes[offset].arithmetic = "";
+			
 		}
 		equation << " < ";
 		if( operands[threadid].operand2.is_tainted )
-			equation << "X%d" << offset << ")";
+			equation << "X%d" << offset;
 		else
-			equation << "0x" << hex << operands[threadid].operand2.value << ")";
+			equation << "0x" << hex << operands[threadid].operand2.value;
+		equation << ")";
 		symbolic_bytes[offset].equation = equation.str();
 		fprintf(f, "%s\n", symbolic_bytes[offset].equation.c_str());
 	}
 	else if( opcode == XED_ICLASS_JNB || opcode == XED_ICLASS_JNL )
 	{
-		equation << symbolic_bytes[offset].equation << "&";
-		if( operands[threadid].operand1.is_tainted )
-			equation << "(X" << offset;
+		equation << symbolic_bytes[offset].equation << "&(";
+		if( symbolic_bytes[offset].arithmetic == "" )
+		{
+			if( operands[threadid].operand1.is_tainted )
+				equation << "X" << offset;
+			else
+				equation << "0x" << hex << operands[threadid].operand1.value;
+		}
 		else
 		{
-			equation << "(0x" << hex << operands[threadid].operand1.value;
+			equation << symbolic_bytes[offset].arithmetic;
+			symbolic_bytes[offset].arithmetic = "";
+			
 		}
 		equation << " >= ";
 		if( operands[threadid].operand2.is_tainted )
-			equation << "X%d" << offset << ")";
+			equation << "X%d" << offset;
 		else
-			equation << "0x" << hex << operands[threadid].operand2.value << ")";
+			equation << "0x" << hex << operands[threadid].operand2.value;
+		equation << ")";
 		symbolic_bytes[offset].equation = equation.str();
 		fprintf(f, "%s\n", symbolic_bytes[offset].equation.c_str());
 	}
 	else if( opcode == XED_ICLASS_JBE || opcode == XED_ICLASS_JLE )
 	{
-		equation << symbolic_bytes[offset].equation << "&";
-		if( operands[threadid].operand1.is_tainted )
-			equation << "(X" << offset;
+		equation << symbolic_bytes[offset].equation << "&(";
+		if( symbolic_bytes[offset].arithmetic == "" )
+		{
+			if( operands[threadid].operand1.is_tainted )
+				equation << "X" << offset;
+			else
+				equation << "0x" << hex << operands[threadid].operand1.value;
+		}
 		else
 		{
-			equation << "(0x" << hex << operands[threadid].operand1.value;
+			equation << symbolic_bytes[offset].arithmetic;
+			symbolic_bytes[offset].arithmetic = "";
+			
 		}
 		equation << " <= ";
 		if( operands[threadid].operand2.is_tainted )
-			equation << "X%d" << offset << ")";
+			equation << "X%d" << offset;
 		else
-			equation << "0x" << hex << operands[threadid].operand2.value << ")";
+			equation << "0x" << hex << operands[threadid].operand2.value;
+		equation << ")";
 		symbolic_bytes[offset].equation = equation.str();
 		fprintf(f, "%s\n", symbolic_bytes[offset].equation.c_str());
 	}
 	else if( opcode == XED_ICLASS_JNBE || opcode == XED_ICLASS_JNLE )
 	{
-		equation << symbolic_bytes[offset].equation << "&";
-		if( operands[threadid].operand1.is_tainted )
-			equation << "(X" << offset;
+		equation << symbolic_bytes[offset].equation << "&(";
+		if( symbolic_bytes[offset].arithmetic == "" )
+		{
+			if( operands[threadid].operand1.is_tainted )
+				equation << "X" << offset;
+			else
+				equation << "0x" << hex << operands[threadid].operand1.value;
+		}
 		else
 		{
-			equation << "(0x" << hex << operands[threadid].operand1.value;
+			equation << symbolic_bytes[offset].arithmetic;
+			symbolic_bytes[offset].arithmetic = "";
+			
 		}
 		equation << " > ";
 		if( operands[threadid].operand2.is_tainted )
-			equation << "X%d" << offset << ")";
+			equation << "X%d" << offset;
 		else
-			equation << "0x" << hex << operands[threadid].operand2.value << ")";
+			equation << "0x" << hex << operands[threadid].operand2.value;
+		equation << ")";
 		symbolic_bytes[offset].equation = equation.str();
 		fprintf(f, "%s\n", symbolic_bytes[offset].equation.c_str());
 	}
@@ -1133,35 +1228,51 @@ void concolic(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32
 		}
 		fprintf(f, "\n");
 		*/
-		equation << symbolic_bytes[offset].equation << "&";
-		if( operands[threadid].operand1.is_tainted )
-			equation << "(X" << offset;
+
+		equation << symbolic_bytes[offset].equation << "&(";
+		if( symbolic_bytes[offset].arithmetic == "" )
+		{
+			if( operands[threadid].operand1.is_tainted )
+				equation << "X" << offset;
+			else
+				equation << "0x" << hex << operands[threadid].operand1.value;
+		}
 		else
 		{
-			equation << "(0x" << hex << operands[threadid].operand1.value;
+			equation << symbolic_bytes[offset].arithmetic;
+			symbolic_bytes[offset].arithmetic = "";
+			
 		}
 		equation << " == ";
 		if( operands[threadid].operand2.is_tainted )
-			equation << "X%d" << offset << ")";
+			equation << "X%d" << offset;
 		else
-			equation << "0x" << hex << operands[threadid].operand2.value << ")";
+			equation << "0x" << hex << operands[threadid].operand2.value;
+		equation << ")";
 		symbolic_bytes[offset].equation = equation.str();
 		fprintf(f, "%s\n", symbolic_bytes[offset].equation.c_str());
 	}
 	else if( opcode == XED_ICLASS_JNZ )
 	{
-		equation << symbolic_bytes[offset].equation << "&";
-		if( operands[threadid].operand1.is_tainted )
-			equation << "(X" << offset;
+		equation << symbolic_bytes[offset].equation << "&(";
+		if( symbolic_bytes[offset].arithmetic == "" )
+		{
+			if( operands[threadid].operand1.is_tainted )
+				equation << "X" << offset;
+			else
+				equation << "0x" << hex << operands[threadid].operand1.value;
+		}
 		else
 		{
-			equation << "(0x" << hex << operands[threadid].operand1.value;
+			equation << symbolic_bytes[offset].arithmetic;
+			symbolic_bytes[offset].arithmetic = "";
 		}
 		equation << " != ";
 		if( operands[threadid].operand2.is_tainted )
-			equation << "X%d" << offset << ")";
+			equation << "X%d" << offset;
 		else
-			equation << "0x" << hex << operands[threadid].operand2.value << ")";
+			equation << "0x" << hex << operands[threadid].operand2.value;
+		equation << ")";
 		symbolic_bytes[offset].equation = equation.str();
 		fprintf(f, "%s\n", symbolic_bytes[offset].equation.c_str());
 	}
