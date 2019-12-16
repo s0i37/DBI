@@ -3,7 +3,7 @@
 #include <list>
 #include <map>
 
-#define VERSION "0.51"
+#define VERSION "0.52"
 #define MAX_TAINT_DATA 0x1000
 
 #if defined(__i386__) || defined(_WIN32)
@@ -851,7 +851,8 @@ void ins_instrument(INS ins, VOID * v)
 					IARG_UINT32, wregs_count,
 					IARG_PTR, wregs,
 					IARG_UINT32, 1,
-					IARG_UINT32, INS_MemoryOperandIsWritten(ins, 0) ? 2 : 1,
+					//IARG_UINT32, INS_MemoryOperandIsWritten(ins, 0) ? 2 : 1,
+					IARG_UINT32, INS_MemoryOperandIsRead(ins, 0) ? 1 : 2,
 					IARG_MEMORYOP_EA, 0,
 					IARG_UINT32, 0,
 					IARG_UINT32, 0,
@@ -868,9 +869,11 @@ void ins_instrument(INS ins, VOID * v)
 					IARG_UINT32, wregs_count,
 					IARG_PTR, wregs,
 					IARG_UINT32, 2,
-					IARG_UINT32, INS_MemoryOperandIsWritten(ins, 0) ? 2 : 1,
+					//IARG_UINT32, INS_MemoryOperandIsWritten(ins, 0) ? 2 : 1,
+					IARG_UINT32, INS_MemoryOperandIsRead(ins, 0) ? 1 : 2,
 					IARG_MEMORYOP_EA, 0,
-					IARG_UINT32, INS_MemoryOperandIsWritten(ins, 1) ? 2 : 1,
+					//IARG_UINT32, INS_MemoryOperandIsWritten(ins, 1) ? 2 : 1,
+					IARG_UINT32, INS_MemoryOperandIsRead(ins, 1) ? 1 : 2,
 					IARG_MEMORYOP_EA, 1,
 					IARG_MEMORYREAD_SIZE,
 					IARG_END);
