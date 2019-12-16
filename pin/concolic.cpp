@@ -5,7 +5,7 @@
 #include <map>
 #include <sstream>
 
-#define VERSION "0.22"
+#define VERSION "0.23"
 #define MAX_TAINT_DATA 0x1000
 
 #if defined(__i386__) || defined(_WIN32)
@@ -41,6 +41,7 @@ typedef struct {
 	UINT64 value;
 	UINT32 size;
 	BOOL is_tainted;
+	ADDRINT source;
 } Operand;
 
 typedef struct {
@@ -52,6 +53,7 @@ typedef struct {
 typedef struct {
 	string equation;
 	string arithmetic;
+	map <ADDRINT, string> arithmetics;
 } Symbolic;
 
 list <ADDRINT> pages;
@@ -653,6 +655,7 @@ void get_operands_value(UINT32 threadid, CONTEXT * ctx, UINT32 rregs_count, REG 
 		//fprintf(f, "[debug] ins reg, [mem] %d\n", memop_index);
 		PIN_GetContextRegval(ctx, rregs[0], (UINT8 *)&register_value);
 		operands[threadid].operand1.size = REG_Size(rregs[0]);
+		operands[threadid].operand1.source = (ADDRINT)rregs[0];
 		switch( operands[threadid].operand1.size )
 		{
 			case 1: operands[threadid].operand1.value = (UINT64) ((UINT8 *)register_value)[0];
@@ -670,6 +673,7 @@ void get_operands_value(UINT32 threadid, CONTEXT * ctx, UINT32 rregs_count, REG 
 			operands[threadid].operand1.is_tainted = false;
 
 		operands[threadid].operand2.size = size;
+		operands[threadid].operand2.source = memop0;
 		switch(size)
 		{
 			case 1: operands[threadid].operand2.value = (UINT64) ((UINT8 *)memop0)[0];
@@ -694,6 +698,7 @@ void get_operands_value(UINT32 threadid, CONTEXT * ctx, UINT32 rregs_count, REG 
 		//fprintf(f, "[debug] ins reg, reg %d\n", memop_index);
 		PIN_GetContextRegval(ctx, rregs[0], (UINT8 *)&register_value);
 		operands[threadid].operand1.size = REG_Size(rregs[0]);
+		operands[threadid].operand1.source = (ADDRINT)rregs[0];
 		switch( operands[threadid].operand1.size )
 		{
 			case 1: operands[threadid].operand1.value = (UINT64) ((UINT8 *)register_value)[0];
@@ -712,6 +717,7 @@ void get_operands_value(UINT32 threadid, CONTEXT * ctx, UINT32 rregs_count, REG 
 
 		PIN_GetContextRegval(ctx, rregs[1], (UINT8 *)&register_value);
 		operands[threadid].operand2.size = REG_Size(rregs[1]);
+		operands[threadid].operand2.source = (ADDRINT)rregs[1];
 		switch( operands[threadid].operand2.size )
 		{
 			case 1: operands[threadid].operand2.value = (UINT64) ((UINT8 *)register_value)[0];
@@ -733,6 +739,7 @@ void get_operands_value(UINT32 threadid, CONTEXT * ctx, UINT32 rregs_count, REG 
 		//fprintf(f, "[debug] ins reg, imm %d\n", memop_index);
 		PIN_GetContextRegval(ctx, rregs[0], (UINT8 *)&register_value);
 		operands[threadid].operand1.size = REG_Size(rregs[0]);
+		operands[threadid].operand1.source = (ADDRINT)rregs[0];
 		switch( operands[threadid].operand1.size )
 		{
 			case 1: operands[threadid].operand1.value = (UINT64) ((UINT8 *)register_value)[0];
@@ -750,6 +757,7 @@ void get_operands_value(UINT32 threadid, CONTEXT * ctx, UINT32 rregs_count, REG 
 			operands[threadid].operand1.is_tainted = false;
 
 		operands[threadid].operand2.size = immediate_size/8;
+		operands[threadid].operand2.source = 0;
 		switch(immediate_size)
 		{
 			case 8: operands[threadid].operand2.value = (UINT64) ((UINT8 *)&immediate)[0];
@@ -767,6 +775,7 @@ void get_operands_value(UINT32 threadid, CONTEXT * ctx, UINT32 rregs_count, REG 
 	{
 		//fprintf(f, "[debug] ins [mem], imm %d\n", memop_index);
 		operands[threadid].operand1.size = size;
+		operands[threadid].operand1.source = memop0;
 		switch(size)
 		{
 			case 1: operands[threadid].operand1.value = (UINT64) ((UINT8 *)memop0)[0];
@@ -787,6 +796,7 @@ void get_operands_value(UINT32 threadid, CONTEXT * ctx, UINT32 rregs_count, REG 
 			}
 
 		operands[threadid].operand2.size = immediate_size/8;
+		operands[threadid].operand2.source = 0;
 		switch(immediate_size)
 		{
 			case 8: operands[threadid].operand2.value = (UINT64) ((UINT8 *)&immediate)[0];
@@ -800,10 +810,11 @@ void get_operands_value(UINT32 threadid, CONTEXT * ctx, UINT32 rregs_count, REG 
 		}
 		operands[threadid].operand2.is_tainted = false;
 	}
-	else if( mems_count == 1 && memop_index == 0 )  /* ins [reg/mem], reg */
+	else if( mems_count == 1 && memop_index == 0 )  /* ins [reg/imm], reg */
 	{
 		//fprintf(f, "[debug] ins [mem], reg %d\n", memop_index);
 		operands[threadid].operand1.size = size;
+		operands[threadid].operand1.source = memop0;
 		switch(size)
 		{
 			case 1: operands[threadid].operand1.value = (UINT64) ((UINT8 *)memop0)[0];
@@ -825,6 +836,7 @@ void get_operands_value(UINT32 threadid, CONTEXT * ctx, UINT32 rregs_count, REG 
 
 		PIN_GetContextRegval(ctx, rregs[1], (UINT8 *)&register_value);
 		operands[threadid].operand2.size = REG_Size(rregs[1]);
+		operands[threadid].operand2.source = (ADDRINT)rregs[1];
 		switch( operands[threadid].operand2.size )
 		{
 			case 1: operands[threadid].operand2.value = (UINT64) ((UINT8 *)register_value)[0];
@@ -905,26 +917,29 @@ void concolic(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32
 	else if( opcode == XED_ICLASS_ADD )
 	{
 		equation << "(";
-		if(symbolic_bytes[offset].arithmetic == "")
+		ADDRINT source;
+		
+		if( ( source = operands[threadid].operand1.source ) != 0 )
 		{
-			if( operands[threadid].operand1.is_tainted )
-				equation << "X" << offset;
-			else
-			{
-				equation << "0x" << hex << operands[threadid].operand1.value;
-			}
+			if( symbolic_bytes[offset].arithmetics[source] == "" )
+				symbolic_bytes[offset].arithmetics[source] = "X1";
 		}
+
+		if(operands[threadid].operand1.is_tainted)
+			equation << symbolic_bytes[offset].arithmetics[source];
 		else
-		{
-			equation << symbolic_bytes[offset].arithmetic;
-		}
+			equation << "0x" << hex << operands[threadid].operand1.value;
+		
 		equation << " + ";
+
 		if( operands[threadid].operand2.is_tainted )
-			equation << "X%d" << offset;
+			equation << "X" << offset;
 		else
 			equation << "0x" << hex << operands[threadid].operand2.value;
 		equation << ")";
-		symbolic_bytes[offset].arithmetic = equation.str();
+
+		/* арифметические операции ассоциируются с регистром/памятью для данного offset */
+		symbolic_bytes[offset].arithmetics[source] = equation.str();
 		fprintf(f, "%s\n", symbolic_bytes[offset].arithmetic.c_str());
 	}
 	else if( opcode == XED_ICLASS_SUB )
@@ -1107,7 +1122,7 @@ void concolic(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32
 		else
 		{
 			equation << symbolic_bytes[offset].arithmetic;
-			symbolic_bytes[offset].arithmetic = "";
+			//symbolic_bytes[offset].arithmetic = "";
 			
 		}
 		equation << " < ";
@@ -1132,7 +1147,7 @@ void concolic(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32
 		else
 		{
 			equation << symbolic_bytes[offset].arithmetic;
-			symbolic_bytes[offset].arithmetic = "";
+			//symbolic_bytes[offset].arithmetic = "";
 			
 		}
 		equation << " >= ";
@@ -1157,7 +1172,7 @@ void concolic(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32
 		else
 		{
 			equation << symbolic_bytes[offset].arithmetic;
-			symbolic_bytes[offset].arithmetic = "";
+			//symbolic_bytes[offset].arithmetic = "";
 			
 		}
 		equation << " <= ";
@@ -1182,7 +1197,7 @@ void concolic(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32
 		else
 		{
 			equation << symbolic_bytes[offset].arithmetic;
-			symbolic_bytes[offset].arithmetic = "";
+			//symbolic_bytes[offset].arithmetic = "";
 			
 		}
 		equation << " > ";
@@ -1240,7 +1255,7 @@ void concolic(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32
 		else
 		{
 			equation << symbolic_bytes[offset].arithmetic;
-			symbolic_bytes[offset].arithmetic = "";
+			//symbolic_bytes[offset].arithmetic = "";
 			
 		}
 		equation << " == ";
@@ -1265,7 +1280,7 @@ void concolic(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32
 		else
 		{
 			equation << symbolic_bytes[offset].arithmetic;
-			symbolic_bytes[offset].arithmetic = "";
+			//symbolic_bytes[offset].arithmetic = "";
 		}
 		equation << " != ";
 		if( operands[threadid].operand2.is_tainted )
