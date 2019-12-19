@@ -5,7 +5,7 @@
 #include <map>
 #include <sstream>
 
-#define VERSION "0.24"
+#define VERSION "0.25"
 #define MAX_TAINT_DATA 0x1000
 
 #if defined(__i386__) || defined(_WIN32)
@@ -57,7 +57,7 @@ map <ADDRINT, unsigned int> tainted_offsets;
 map <ADDRINT, unsigned int> tainted_operations;
 map < int, list <REG> > tainted_regs;
 map < int, Operands > operands;
-map < int, string > symbolic_bytes;
+map < int, string > equations;
 map < int, string > symbolic_memory;
 map < int, map<int,string> > symbolic_registers;
 
@@ -87,13 +87,210 @@ KNOB<string> Knob_taint(KNOB_MODE_WRITEONCE,  "pintool", "taint", "", "taint thi
 KNOB<UINT32> Knob_offset(KNOB_MODE_WRITEONCE,  "pintool", "offset", "0", "from offset (subdata)");
 KNOB<UINT32> Knob_size(KNOB_MODE_WRITEONCE,  "pintool", "size", "0", "size bytes (subdata)");
 
-void add_symbolic_memory(ADDRINT addr, string equation)
+void add_symbolic_memory(ADDRINT addr, string expression)
 {
-	symbolic_memory[addr] = equation;
+	fprintf(f,"[debug] 0x%lx: %s\n", addr, expression.c_str());
+	symbolic_memory[addr] = expression;
 }
-void add_symbolic_register(REG reg, UINT32 threadid, string equation)
+void add_symbolic_register(REG reg, UINT32 threadid, string expression)
 {
-	symbolic_registers[threadid][reg] = equation;
+	fprintf(f,"[debug] %s= %s\n", REG_StringShort(reg).c_str(), expression.c_str());
+	switch(reg)
+	{
+		case REG_AH:	symbolic_registers[threadid][REG_AH] = expression;
+						return;
+		case REG_DH:	symbolic_registers[threadid][REG_DH] = expression;
+						return;
+		case REG_CH:	symbolic_registers[threadid][REG_CH] = expression;
+						return;
+		case REG_BH:	symbolic_registers[threadid][REG_BH] = expression;
+						return;
+		default:		break;
+	}
+
+	switch(reg)
+	{
+		case REG_GAX:	symbolic_registers[threadid][REG_GAX] = expression;
+	#if defined(X64)
+		case REG_EAX:	symbolic_registers[threadid][REG_EAX] = expression;
+	#endif
+		case REG_AX:	symbolic_registers[threadid][REG_AX] = expression;
+		case REG_AH:	symbolic_registers[threadid][REG_AH] = expression;
+		case REG_AL:	symbolic_registers[threadid][REG_AL] = expression;
+						break;
+
+		case REG_GDX:	symbolic_registers[threadid][REG_GDX] = expression;
+	#if defined(X64)
+		case REG_EDX:	symbolic_registers[threadid][REG_EDX] = expression;
+	#endif
+		case REG_DX:	symbolic_registers[threadid][REG_DX] = expression;
+		case REG_DH:	symbolic_registers[threadid][REG_DH] = expression;
+		case REG_DL:	symbolic_registers[threadid][REG_DL] = expression;
+						break;
+
+		case REG_GCX:	symbolic_registers[threadid][REG_GCX] = expression;
+	#if defined(X64)
+		case REG_ECX:	symbolic_registers[threadid][REG_ECX] = expression;
+	#endif
+		case REG_CX:	symbolic_registers[threadid][REG_CX] = expression;
+		case REG_CH:	symbolic_registers[threadid][REG_CH] = expression;
+		case REG_CL:	symbolic_registers[threadid][REG_CL] = expression;
+						break;
+
+		case REG_GBX:	symbolic_registers[threadid][REG_GBX] = expression;
+	#if defined(X64)
+		case REG_EBX:	symbolic_registers[threadid][REG_EBX] = expression;
+	#endif
+		case REG_BX:	symbolic_registers[threadid][REG_BX] = expression;
+		case REG_BH:	symbolic_registers[threadid][REG_BH] = expression;
+		case REG_BL:	symbolic_registers[threadid][REG_BL] = expression;
+						break;
+
+		case REG_GBP: 	symbolic_registers[threadid][REG_GBP] = expression;
+	#if defined(X64)
+		case REG_EBP: 	symbolic_registers[threadid][REG_EBP] = expression;
+	#endif
+		case REG_BP: 	symbolic_registers[threadid][REG_BP] = expression;
+						break;
+
+		case REG_GDI:	symbolic_registers[threadid][REG_GDI] = expression;
+	#if defined(X64)
+		case REG_EDI:	symbolic_registers[threadid][REG_EDI] = expression;
+	#endif
+		case REG_DI:	symbolic_registers[threadid][REG_DI] = expression;
+						break;
+
+		case REG_GSI:	symbolic_registers[threadid][REG_GSI] = expression;
+	#if defined(X64)
+		case REG_ESI:	symbolic_registers[threadid][REG_ESI] = expression;
+	#endif
+		case REG_SI:	symbolic_registers[threadid][REG_SI] = expression;
+						break;
+
+	#if defined(X64)
+		case REG_R8: 	symbolic_registers[threadid][REG_R8] = expression;
+		case REG_R8D:	symbolic_registers[threadid][REG_R8D] = expression;
+		case REG_R8W:	symbolic_registers[threadid][REG_R8W] = expression;
+		case REG_R8B:	symbolic_registers[threadid][REG_R8B] = expression;
+						break;
+	#endif
+
+	#if defined(X64)
+		case REG_R9: 	symbolic_registers[threadid][REG_R9] = expression;
+		case REG_R9D:	symbolic_registers[threadid][REG_R9D] = expression;
+		case REG_R9W:	symbolic_registers[threadid][REG_R9W] = expression;
+		case REG_R9B:	symbolic_registers[threadid][REG_R9B] = expression;
+						break;
+	#endif
+
+	#if defined(X64)
+		case REG_R10: 	symbolic_registers[threadid][REG_R10] = expression;
+		case REG_R10D:	symbolic_registers[threadid][REG_R10D] = expression;
+		case REG_R10W:	symbolic_registers[threadid][REG_R10W] = expression;
+		case REG_R10B:	symbolic_registers[threadid][REG_R10B] = expression;
+						break;
+	#endif
+
+	#if defined(X64)
+		case REG_R11: 	symbolic_registers[threadid][REG_R11] = expression;
+		case REG_R11D:	symbolic_registers[threadid][REG_R11D] = expression;
+		case REG_R11W:	symbolic_registers[threadid][REG_R11W] = expression;
+		case REG_R11B:	symbolic_registers[threadid][REG_R11B] = expression;
+						break;
+	#endif
+
+	#if defined(X64)
+		case REG_R12: 	symbolic_registers[threadid][REG_R12] = expression;
+		case REG_R12D:	symbolic_registers[threadid][REG_R12D] = expression;
+		case REG_R12W:	symbolic_registers[threadid][REG_R12W] = expression;
+		case REG_R12B:	symbolic_registers[threadid][REG_R12B] = expression;
+						break;
+	#endif
+
+	#if defined(X64)
+		case REG_R13: 	symbolic_registers[threadid][REG_R13] = expression;
+		case REG_R13D:	symbolic_registers[threadid][REG_R13D] = expression;
+		case REG_R13W:	symbolic_registers[threadid][REG_R13W] = expression;
+		case REG_R13B:	symbolic_registers[threadid][REG_R13B] = expression;
+						break;
+	#endif
+
+	#if defined(X64)
+		case REG_R14: 	symbolic_registers[threadid][REG_R14] = expression;
+		case REG_R14D:	symbolic_registers[threadid][REG_R14D] = expression;
+		case REG_R14W:	symbolic_registers[threadid][REG_R14W] = expression;
+		case REG_R14B:	symbolic_registers[threadid][REG_R14B] = expression;
+						break;
+	#endif
+
+	#if defined(X64)
+		case REG_R15: 	symbolic_registers[threadid][REG_R15] = expression;
+		case REG_R15D:	symbolic_registers[threadid][REG_R15D] = expression;
+		case REG_R15W:	symbolic_registers[threadid][REG_R15W] = expression;
+		case REG_R15B:	symbolic_registers[threadid][REG_R15B] = expression;
+						break;
+	#endif
+
+	case REG_XMM0:	symbolic_registers[threadid][REG_XMM0] = expression;
+					break;
+	case REG_XMM1:	symbolic_registers[threadid][REG_XMM1] = expression;
+					break;
+	case REG_XMM2:	symbolic_registers[threadid][REG_XMM2] = expression;
+					break;
+	case REG_XMM3:	symbolic_registers[threadid][REG_XMM3] = expression;
+					break;
+	case REG_XMM4:	symbolic_registers[threadid][REG_XMM4] = expression;
+					break;
+	case REG_XMM5:	symbolic_registers[threadid][REG_XMM5] = expression;
+					break;
+	case REG_XMM6:	symbolic_registers[threadid][REG_XMM6] = expression;
+					break;
+	case REG_XMM7:	symbolic_registers[threadid][REG_XMM7] = expression;
+					break;
+	#if defined(X64)
+	case REG_XMM8:	symbolic_registers[threadid][REG_XMM8] = expression;
+					break;
+	case REG_XMM9:	symbolic_registers[threadid][REG_XMM9] = expression;
+					break;
+	case REG_XMM10:	symbolic_registers[threadid][REG_XMM10] = expression;
+					break;
+	case REG_XMM11:	symbolic_registers[threadid][REG_XMM11] = expression;
+					break;
+	case REG_XMM12:	symbolic_registers[threadid][REG_XMM12] = expression;
+					break;
+	case REG_XMM13:	symbolic_registers[threadid][REG_XMM13] = expression;
+					break;
+	case REG_XMM14:	symbolic_registers[threadid][REG_XMM14] = expression;
+					break;
+	case REG_XMM15:	symbolic_registers[threadid][REG_XMM15] = expression;
+					break;
+	#endif
+
+	case REG_ST0:	symbolic_registers[threadid][REG_ST0] = expression;
+					break;
+	case REG_ST1:	symbolic_registers[threadid][REG_ST1] = expression;
+					break;
+	case REG_ST2:	symbolic_registers[threadid][REG_ST2] = expression;
+					break;
+	case REG_ST3:	symbolic_registers[threadid][REG_ST3] = expression;
+					break;
+	case REG_ST4:	symbolic_registers[threadid][REG_ST4] = expression;
+					break;
+	case REG_ST5:	symbolic_registers[threadid][REG_ST5] = expression;
+					break;
+	case REG_ST6:	symbolic_registers[threadid][REG_ST6] = expression;
+					break;
+	case REG_ST7:	symbolic_registers[threadid][REG_ST7] = expression;
+					break;
+
+	#if defined(X64)
+		case REG_RFLAGS:	symbolic_registers[threadid][REG_RFLAGS] = expression;
+	#endif
+	case REG_EFLAGS:	symbolic_registers[threadid][REG_EFLAGS] = expression;
+	case REG_FLAGS:		symbolic_registers[threadid][REG_FLAGS] = expression;
+						break;
+	default:		break;
+	}
 }
 void del_symbolic_memory(ADDRINT addr)
 {	
@@ -603,6 +800,7 @@ void find_tainted_data(ADDRINT mem)
 	unsigned int i = 0;
 	BOOL is_match = false;
 	list <ADDRINT>::iterator addr_it;
+	char sym[8] = {0};
 
 	if(PIN_CheckReadAccess((VOID*)mem))
 		for(i = 0; i < taint_data_len; i++)
@@ -638,10 +836,18 @@ void find_tainted_data(ADDRINT mem)
 		if(taint_size)
 		{
 			if(i >= taint_offset && i < taint_offset+taint_size)
+			{
 				add_mem_taint(mem + i);
+				sprintf((char *)&sym, "X%d", i);
+				add_symbolic_memory( mem+i, sym );
+			}
 		}
 		else
+		{
 			add_mem_taint(mem + i);
+			sprintf((char *)&sym, "X%d", i);
+			add_symbolic_memory( mem+i, sym );
+		}
 		tainted_offsets[mem+i] = i;
 	}
 	fprintf(f, "\n");
@@ -870,8 +1076,8 @@ void get_operands_value(UINT32 threadid, CONTEXT * ctx, UINT32 rregs_count, REG 
 unsigned int offset = -1; /* индекс в tainted_data */
 string concolic(REG reg, ADDRINT mem, UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rregs_count, REG * rregs, UINT32 wregs_count, REG * wregs, UINT32 mems_count, UINT32 memop0_type, ADDRINT memop0, UINT32 memop1_type, ADDRINT memop1, UINT32 size, UINT32 memop_index, UINT64 immediate, UINT32 immediate_size)
 {
-	stringstream equation = "";
-	string expression;
+	stringstream equation, expression;
+	string expression_prev;
 	if(XED_ICLASS_JB > opcode || opcode > XED_ICLASS_JZ)
 		get_operands_value(threadid, ctx, rregs_count, rregs, wregs_count, wregs, mems_count, memop0_type, memop0, memop1_type, memop1, size, memop_index, immediate, immediate_size);
 
@@ -879,10 +1085,11 @@ string concolic(REG reg, ADDRINT mem, UINT32 threadid, ADDRINT eip, CONTEXT * ct
 	{
 		if( operands[threadid].operand1.is_tainted )
 		{
-			fprintf(f, "x=SYM, ");
+			//fprintf(f, "x=SYM, ");
 		}
 		else
 		{
+			/*
 			switch(operands[threadid].operand1.size)
 			{
 				case 1: fprintf(f, "x=%02x, ", (UINT8)operands[threadid].operand1.value); break;
@@ -890,13 +1097,15 @@ string concolic(REG reg, ADDRINT mem, UINT32 threadid, ADDRINT eip, CONTEXT * ct
 				case 4: fprintf(f, "x=%08x, ", (UINT32)operands[threadid].operand1.value); break;
 				case 8: fprintf(f, "x=%016lx, ", (UINT64)operands[threadid].operand1.value); break;
 			}
+			*/
 		}
 		if( operands[threadid].operand2.is_tainted )
 		{
-			fprintf(f, "y=SYM\n");
+			//fprintf(f, "y=SYM\n");
 		}
 		else
 		{
+			/*
 			switch(operands[threadid].operand2.size)
 			{
 				case 1: fprintf(f, "y=%02x\n", (UINT8)operands[threadid].operand2.value); break;
@@ -904,16 +1113,18 @@ string concolic(REG reg, ADDRINT mem, UINT32 threadid, ADDRINT eip, CONTEXT * ct
 				case 4: fprintf(f, "y=%08x\n", (UINT32)operands[threadid].operand2.value); break;
 				case 8: fprintf(f, "y=%016lx\n", (UINT64)operands[threadid].operand2.value); break;
 			}
+			*/
 		}
 	}
 	else if( opcode == XED_ICLASS_TEST )
 	{
 		if( operands[threadid].operand1.is_tainted )
 		{
-			fprintf(f, "x=SYM, ");
+			//fprintf(f, "x=SYM, ");
 		}
 		else
 		{
+			/*
 			switch(operands[threadid].operand1.size)
 			{
 				case 1: fprintf(f, "x=%02x, ", (UINT8)operands[threadid].operand1.value); break;
@@ -921,58 +1132,60 @@ string concolic(REG reg, ADDRINT mem, UINT32 threadid, ADDRINT eip, CONTEXT * ct
 				case 4: fprintf(f, "x=%08x, ", (UINT32)operands[threadid].operand1.value); break;
 				case 8: fprintf(f, "x=%016lx, ", (UINT64)operands[threadid].operand1.value); break;
 			}
+			*/
 		}
 		operands[threadid].operand2.value = 0;
 		operands[threadid].operand2.size = 1;
 		operands[threadid].operand2.is_tainted = false;
-		fprintf(f, "y=0\n");
+		//fprintf(f, "y=0\n");
 	}
 	else if( opcode == XED_ICLASS_ADD )
 	{
 		/* op1 = op1 + op2 */
 
-		equation << "(";
+		expression << "(";
 		if(reg)
-			expression = symbolic_registers[reg];
+			expression_prev = symbolic_registers[threadid][reg];
 		else if(mem)
-			expression = symbolic_memory[mem];
+			expression_prev = symbolic_memory[mem];
 
 		if(operands[threadid].operand1.is_tainted)
-			equation << expression;
+			expression << expression_prev;
 		else
-			equation << "0x" << hex << operands[threadid].operand1.value;
+			expression << "0x" << hex << operands[threadid].operand1.value;
 		
-		equation << " + ";
+		expression << " + ";
 
 		if( operands[threadid].operand2.is_tainted )
-			equation << expression;
+			expression << expression_prev;
 		else
-			equation << "0x" << hex << operands[threadid].operand2.value;
-		equation << ")";
-
+			expression << "0x" << hex << operands[threadid].operand2.value;
+		expression << ")";
+		fprintf(f, "%s\n", expression.str().c_str());
 	}
 	else if( opcode == XED_ICLASS_SUB )
 	{
 		/* op1 = op1 - op2 */
 
-		equation << "(";
+		expression << "(";
 		if(reg)
-			expression = symbolic_registers[reg];
+			expression_prev = symbolic_registers[threadid][reg];
 		else if(mem)
-			expression = symbolic_memory[mem];
+			expression_prev = symbolic_memory[mem];
 
 		if(operands[threadid].operand1.is_tainted)
-			equation << expression;
+			expression << expression_prev;
 		else
-			equation << "0x" << hex << operands[threadid].operand1.value;
+			expression << "0x" << hex << operands[threadid].operand1.value;
 		
-		equation << " - ";
+		expression << " - ";
 
 		if( operands[threadid].operand2.is_tainted )
-			equation << expression;
+			expression << expression_prev;
 		else
-			equation << "0x" << hex << operands[threadid].operand2.value;
-		equation << ")";
+			expression << "0x" << hex << operands[threadid].operand2.value;
+		expression << ")";
+		fprintf(f, "%s\n", expression.str().c_str());
 	}
 	else if( opcode == XED_ICLASS_MUL )
 	{
@@ -986,116 +1199,121 @@ string concolic(REG reg, ADDRINT mem, UINT32 threadid, ADDRINT eip, CONTEXT * ct
 	{
 		/* op1 = op1 & op2 */
 
-		equation << "(";
+		expression << "(";
 		if(reg)
-			expression = symbolic_registers[reg];
+			expression_prev = symbolic_registers[threadid][reg];
 		else if(mem)
-			expression = symbolic_memory[mem];
+			expression_prev = symbolic_memory[mem];
 
 		if(operands[threadid].operand1.is_tainted)
-			equation << expression;
+			expression << expression_prev;
 		else
-			equation << "0x" << hex << operands[threadid].operand1.value;
+			expression << "0x" << hex << operands[threadid].operand1.value;
 		
-		equation << " & ";
+		expression << " & ";
 
 		if( operands[threadid].operand2.is_tainted )
-			equation << expression;
+			expression << expression_prev;
 		else
-			equation << "0x" << hex << operands[threadid].operand2.value;
-		equation << ")";
+			expression << "0x" << hex << operands[threadid].operand2.value;
+		expression << ")";
+		fprintf(f, "%s\n", expression.str().c_str());
 	}
 	else if( opcode == XED_ICLASS_OR )
 	{
 		/* op1 = op1 | op2 */
 		
-		equation << "(";
+		expression << "(";
 		if(reg)
-			expression = symbolic_registers[reg];
+			expression_prev = symbolic_registers[threadid][reg];
 		else if(mem)
-			expression = symbolic_memory[mem];
+			expression_prev = symbolic_memory[mem];
 
 		if(operands[threadid].operand1.is_tainted)
-			equation << expression;
+			expression << expression_prev;
 		else
-			equation << "0x" << hex << operands[threadid].operand1.value;
+			expression << "0x" << hex << operands[threadid].operand1.value;
 		
-		equation << " | ";
+		expression << " | ";
 
 		if( operands[threadid].operand2.is_tainted )
-			equation << expression;
+			expression << expression_prev;
 		else
-			equation << "0x" << hex << operands[threadid].operand2.value;
-		equation << ")";
+			expression << "0x" << hex << operands[threadid].operand2.value;
+		expression << ")";
+		fprintf(f, "%s\n", expression.str().c_str());
 	}
 	else if( opcode == XED_ICLASS_XOR )
 	{
 		/* op1 = op1 ^ op2 */
 		
-		equation << "(";
+		expression << "(";
 		if(reg)
-			expression = symbolic_registers[reg];
+			expression_prev = symbolic_registers[threadid][reg];
 		else if(mem)
-			expression = symbolic_memory[mem];
+			expression_prev = symbolic_memory[mem];
 
 		if(operands[threadid].operand1.is_tainted)
-			equation << expression;
+			expression << expression_prev;
 		else
-			equation << "0x" << hex << operands[threadid].operand1.value;
+			expression << "0x" << hex << operands[threadid].operand1.value;
 		
-		equation << " ^ ";
+		expression << " ^ ";
 
 		if( operands[threadid].operand2.is_tainted )
-			equation << expression;
+			expression << expression_prev;
 		else
-			equation << "0x" << hex << operands[threadid].operand2.value;
-		equation << ")";
+			expression << "0x" << hex << operands[threadid].operand2.value;
+		expression << ")";
+		fprintf(f, "%s\n", expression.str().c_str());
 	}
 	else if( opcode == XED_ICLASS_SHL )
 	{
 		/* op1 = op1 << op2 */
 		
-		equation << "(";
+		expression << "(";
 		if(reg)
-			expression = symbolic_registers[reg];
+			expression_prev = symbolic_registers[threadid][reg];
 		else if(mem)
-			expression = symbolic_memory[mem];
+			expression_prev = symbolic_memory[mem];
 
 		if(operands[threadid].operand1.is_tainted)
-			equation << expression;
+			expression << expression_prev;
 		else
-			equation << "0x" << hex << operands[threadid].operand1.value;
+			expression << "0x" << hex << operands[threadid].operand1.value;
 		
-		equation << " << ";
+		expression << " << ";
 
 		if( operands[threadid].operand2.is_tainted )
-			equation << expression;
+			expression << expression_prev;
 		else
-			equation << "0x" << hex << operands[threadid].operand2.value;
-		equation << ")";
+			expression << "0x" << hex << operands[threadid].operand2.value;
+		expression << ")";
+		fprintf(f, "%s\n", expression.str().c_str());
 	}
 	else if( opcode == XED_ICLASS_SHR )
 	{
 		/* op1 = op1 >> op2 */
 
-		equation << "(";
+		expression << "(";
 		if(reg)
-			expression = symbolic_registers[reg];
+			expression_prev = symbolic_registers[threadid][reg];
 		else if(mem)
-			expression = symbolic_memory[mem];
+			expression_prev = symbolic_memory[mem];
 
 		if(operands[threadid].operand1.is_tainted)
-			equation << expression;
+			expression << expression_prev;
 		else
-			equation << "0x" << hex << operands[threadid].operand1.value;
+			expression << "0x" << hex << operands[threadid].operand1.value;
 		
-		equation << " >> ";
+		expression << " >> ";
 
 		if( operands[threadid].operand2.is_tainted )
-			equation << expression;
+			expression << expression_prev;
 		else
-			equation << "0x" << hex << operands[threadid].operand2.value;
-		equation << ")";
+			expression << "0x" << hex << operands[threadid].operand2.value;
+		expression << ")";
+		fprintf(f, "%s\n", expression.str().c_str());
 	}
 	else if( opcode == XED_ICLASS_NEG )
 	{
@@ -1110,177 +1328,193 @@ string concolic(REG reg, ADDRINT mem, UINT32 threadid, ADDRINT eip, CONTEXT * ct
 	{
 		/* a < b */
 
-		equation << symbolic_bytes[offset] << "&(";
+		equation << equations[offset] << "&(";
 		if(reg)
-			expression = symbolic_registers[reg];
+			expression_prev = symbolic_registers[threadid][reg];
 		else if(mem)
-			expression = symbolic_memory[mem];
+			expression_prev = symbolic_memory[mem];
 
 		if( operands[threadid].operand1.is_tainted )
-			equation << expression;
+			equation << expression_prev;
 		else
 			equation << "0x" << hex << operands[threadid].operand1.value;
 
 		equation << " < ";
 
 		if( operands[threadid].operand2.is_tainted )
-			equation << expression;
+			equation << expression_prev;
 		else
 			equation << "0x" << hex << operands[threadid].operand2.value;
 		equation << ")";
+		equations[offset] = equation.str();
+		fprintf(f, "%s\n", equations[offset].c_str());
 	}
 	else if( opcode == XED_ICLASS_JNB || opcode == XED_ICLASS_JNL )
 	{
 		/* a >= b */
 
-		equation << symbolic_bytes[offset] << "&(";
+		equation << equations[offset] << "&(";
 		if(reg)
-			expression = symbolic_registers[reg];
+			expression_prev = symbolic_registers[threadid][reg];
 		else if(mem)
-			expression = symbolic_memory[mem];
+			expression_prev = symbolic_memory[mem];
 
 		if( operands[threadid].operand1.is_tainted )
-			equation << expression;
+			equation << expression_prev;
 		else
 			equation << "0x" << hex << operands[threadid].operand1.value;
 
 		equation << " >= ";
 
 		if( operands[threadid].operand2.is_tainted )
-			equation << expression;
+			equation << expression_prev;
 		else
 			equation << "0x" << hex << operands[threadid].operand2.value;
 		equation << ")";
+		equations[offset] = equation.str();
+		fprintf(f, "%s\n", equations[offset].c_str());
 	}
 	else if( opcode == XED_ICLASS_JBE || opcode == XED_ICLASS_JLE )
 	{
 		/* a <= b */
 
-		equation << symbolic_bytes[offset] << "&(";
+		equation << equations[offset] << "&(";
 		if(reg)
-			expression = symbolic_registers[reg];
+			expression_prev = symbolic_registers[threadid][reg];
 		else if(mem)
-			expression = symbolic_memory[mem];
+			expression_prev = symbolic_memory[mem];
 
 		if( operands[threadid].operand1.is_tainted )
-			equation << expression;
+			equation << expression_prev;
 		else
 			equation << "0x" << hex << operands[threadid].operand1.value;
 
 		equation << " <= ";
 
 		if( operands[threadid].operand2.is_tainted )
-			equation << expression;
+			equation << expression_prev;
 		else
 			equation << "0x" << hex << operands[threadid].operand2.value;
 		equation << ")";
+		equations[offset] = equation.str();
+		fprintf(f, "%s\n", equations[offset].c_str());
 	}
 	else if( opcode == XED_ICLASS_JNBE || opcode == XED_ICLASS_JNLE )
 	{
 		/* a > b */
 		
-		equation << symbolic_bytes[offset] << "&(";
+		equation << equations[offset] << "&(";
 		if(reg)
-			expression = symbolic_registers[reg];
+			expression_prev = symbolic_registers[threadid][reg];
 		else if(mem)
-			expression = symbolic_memory[mem];
+			expression_prev = symbolic_memory[mem];
 
 		if( operands[threadid].operand1.is_tainted )
-			equation << expression;
+			equation << expression_prev;
 		else
 			equation << "0x" << hex << operands[threadid].operand1.value;
 
 		equation << " > ";
 
 		if( operands[threadid].operand2.is_tainted )
-			equation << expression;
+			equation << expression_prev;
 		else
 			equation << "0x" << hex << operands[threadid].operand2.value;
 		equation << ")";
+		equations[offset] = equation.str();
+		fprintf(f, "%s\n", equations[offset].c_str());
 	}
 	else if( opcode == XED_ICLASS_JZ )
 	{
 		/* == */
 
-		equation << symbolic_bytes[offset] << "&(";
+		equation << equations[offset] << "&(";
 		if(reg)
-			expression = symbolic_registers[reg];
+			expression_prev = symbolic_registers[threadid][reg];
 		else if(mem)
-			expression = symbolic_memory[mem];
+			expression_prev = symbolic_memory[mem];
 
 		if( operands[threadid].operand1.is_tainted )
-			equation << expression;
+			equation << expression_prev;
 		else
 			equation << "0x" << hex << operands[threadid].operand1.value;
 
 		equation << " == ";
 
 		if( operands[threadid].operand2.is_tainted )
-			equation << expression;
+			equation << expression_prev;
 		else
 			equation << "0x" << hex << operands[threadid].operand2.value;
 		equation << ")";
+		equations[offset] = equation.str();
+		fprintf(f, "%s\n", equations[offset].c_str());
 	}
 	else if( opcode == XED_ICLASS_JNZ )
 	{
 		/* != */
 
-		equation << symbolic_bytes[offset] << "&(";
+		equation << equations[offset] << "&(";
 		if(reg)
-			expression = symbolic_registers[reg];
+			expression_prev = symbolic_registers[threadid][reg];
 		else if(mem)
-			expression = symbolic_memory[mem];
+			expression_prev = symbolic_memory[mem];
 
 		if( operands[threadid].operand1.is_tainted )
-			equation << expression;
+			equation << expression_prev;
 		else
 			equation << "0x" << hex << operands[threadid].operand1.value;
 
 		equation << " != ";
 
 		if( operands[threadid].operand2.is_tainted )
-			equation << expression;
+			equation << expression_prev;
 		else
 			equation << "0x" << hex << operands[threadid].operand2.value;
 		equation << ")";
+		equations[offset] = equation.str();
+		fprintf(f, "%s\n", equations[offset].c_str());
 	}
 	else if( opcode == XED_ICLASS_JS )
 	{
 		/* a < 0 */
 		
-		equation << symbolic_bytes[offset] << "&(";
+		equation << equations[offset] << "&(";
 		if(reg)
-			expression = symbolic_registers[reg];
+			expression_prev = symbolic_registers[threadid][reg];
 		else if(mem)
-			expression = symbolic_memory[mem];
+			expression_prev = symbolic_memory[mem];
 
 		if( operands[threadid].operand1.is_tainted )
-			equation << expression;
+			equation << expression_prev;
 		else
 			equation << "0x" << hex << operands[threadid].operand1.value;
 
 		equation << " < ";
 		equation << "0";
 		equation << ")";
+		equations[offset] = equation.str();
+		fprintf(f, "%s\n", equations[offset].c_str());
 	}
 	else if( opcode == XED_ICLASS_JNS )
 	{
 		/* a > 0 */
 		
-		equation << symbolic_bytes[offset] << "&(";
+		equation << equations[offset] << "&(";
 		if(reg)
-			expression = symbolic_registers[reg];
+			expression_prev = symbolic_registers[threadid][reg];
 		else if(mem)
-			expression = symbolic_memory[mem];
+			expression_prev = symbolic_memory[mem];
 
 		if( operands[threadid].operand1.is_tainted )
-			equation << expression;
+			equation << expression_prev;
 		else
 			equation << "0x" << hex << operands[threadid].operand1.value;
 
 		equation << " > ";
 		equation << "0";
 		equation << ")";
+		equations[offset] = equation.str();
+		fprintf(f, "%s\n", equations[offset].c_str());
 	}
 	else if( opcode == XED_ICLASS_JO )
 	{
@@ -1294,39 +1528,43 @@ string concolic(REG reg, ADDRINT mem, UINT32 threadid, ADDRINT eip, CONTEXT * ct
 	{
 		/* a % 2 == 0 */
 		
-		equation << symbolic_bytes[offset] << "&(";
+		equation << equations[offset] << "&(";
 		if(reg)
-			expression = symbolic_registers[reg];
+			expression_prev = symbolic_registers[threadid][reg];
 		else if(mem)
-			expression = symbolic_memory[mem];
+			expression_prev = symbolic_memory[mem];
 
 		if( operands[threadid].operand1.is_tainted )
-			equation << expression;
+			equation << expression_prev;
 		else
 			equation << "0x" << hex << operands[threadid].operand1.value;
 
 		equation << "%%2 == ";
 		equation << "0";
 		equation << ")";
+		equations[offset] = equation.str();
+		fprintf(f, "%s\n", equations[offset].c_str());
 	}		
 	else if( opcode == XED_ICLASS_JNP )
 	{
 		/* a % 2 != 0 */
 		
-		equation << symbolic_bytes[offset] << "&(";
+		equation << equations[offset] << "&(";
 		if(reg)
-			expression = symbolic_registers[reg];
+			expression_prev = symbolic_registers[threadid][reg];
 		else if(mem)
-			expression = symbolic_memory[mem];
+			expression_prev = symbolic_memory[mem];
 
 		if( operands[threadid].operand1.is_tainted )
-			equation << expression;
+			equation << expression_prev;
 		else
 			equation << "0x" << hex << operands[threadid].operand1.value;
 
 		equation << "%%2 != ";
 		equation << "0";
 		equation << ")";
+		equations[offset] = equation.str();
+		fprintf(f, "%s\n", equations[offset].c_str());
 	}
 	else if( opcode == XED_ICLASS_JCXZ )
 	{
@@ -1340,7 +1578,7 @@ string concolic(REG reg, ADDRINT mem, UINT32 threadid, ADDRINT eip, CONTEXT * ct
 	{
 		//fprintf(f, "(rcx == 0)\n");
 	}
-	return equation.str();
+	return expression.str();
 }
 
 void track_operations(OPCODE opcode, ADDRINT addr)
@@ -1360,6 +1598,7 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rr
 	REG reg = (REG) 0;
 	UINT8 register_value[128] = {0};
 	string expression = "";
+
 	ins_count++;
 
 	if(ins_count % 1000000 == 0)
@@ -1419,6 +1658,7 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rr
 		if( (eip >= low_boundary && eip < high_boundary) || (low_boundary == 0 && high_boundary == 0) )
 			expression = concolic(reg, taint_memory_read, threadid, eip, ctx, opcode, rregs_count, rregs, wregs_count, wregs, mems_count, memop0_type, memop0, memop1_type, memop1, size, memop_index, immediate, immediate_size);
 
+		fprintf(f, "[debug] concolic: %s\n", expression.c_str());
 		/* прямое обращение к памяти на запись */
 		if( mems_count != 0 && (memop0_type == 2 || memop1_type == 2) ) /* если есть записываемый операнд памяти */
 		{
@@ -1430,6 +1670,14 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rr
 					tainted_offsets[memop0+i] = offset+i;
 					if(expression != "")
 						add_symbolic_memory( memop0+i, expression );
+					else
+					{
+						if(reg)
+							add_symbolic_memory( memop0+i, symbolic_registers[threadid][reg] );
+						else if(taint_memory_read)
+							add_symbolic_memory( memop0+i, symbolic_memory[taint_memory_read] );
+					}
+
 				}
 				taint_memory_write = memop0;
 			}
@@ -1441,6 +1689,13 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rr
 					tainted_offsets[memop1+i] = offset+i;
 					if(expression != "")
 						add_symbolic_memory( memop0+i, expression );
+					else
+					{
+						if(reg)
+							add_symbolic_memory( memop0+i, symbolic_registers[threadid][reg] );
+						else if(taint_memory_read)
+							add_symbolic_memory( memop0+i, symbolic_memory[taint_memory_read] );
+					}
 				}
 				taint_memory_write = memop1;
 			}
@@ -1451,6 +1706,13 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rr
 			add_reg_taint( wregs[j], threadid );  /* пометить записываемый регистр */
 			if(expression != "")
 				add_symbolic_register( wregs[j], threadid, expression );
+			else
+			{
+				if(reg)
+					add_symbolic_register( wregs[j], threadid, symbolic_registers[threadid][reg] );
+				else if(taint_memory_read)
+					add_symbolic_register( wregs[j], threadid, symbolic_memory[taint_memory_read] );
+			}
 		}
 	}
 	else  /* если распространение не было найдено */
@@ -1613,7 +1875,9 @@ void ins_instrument(INS ins, VOID * v)
 					IARG_UINT32, wregs_count,
 					IARG_PTR, wregs,
 					IARG_UINT32, 1,
-					IARG_UINT32, INS_MemoryOperandIsWritten(ins, 0) ? 2 : 1,
+					//IARG_UINT32, INS_MemoryOperandIsWritten(ins, 0) ? 2 : 1,
+					IARG_UINT32, INS_MemoryOperandIsRead(ins, 0) ? 1 : 2,
+					/* !операнд может быть и READ и WRITE in same time! */
 					IARG_MEMORYOP_EA, 0,
 					IARG_UINT32, 0,
 					IARG_UINT32, 0,
@@ -1633,9 +1897,11 @@ void ins_instrument(INS ins, VOID * v)
 					IARG_UINT32, wregs_count,
 					IARG_PTR, wregs,
 					IARG_UINT32, 2,
-					IARG_UINT32, INS_MemoryOperandIsWritten(ins, 0) ? 2 : 1,
+					//IARG_UINT32, INS_MemoryOperandIsWritten(ins, 0) ? 2 : 1,
+					IARG_UINT32, INS_MemoryOperandIsRead(ins, 0) ? 1 : 2,
 					IARG_MEMORYOP_EA, 0,
-					IARG_UINT32, INS_MemoryOperandIsWritten(ins, 1) ? 2 : 1,
+					//IARG_UINT32, INS_MemoryOperandIsWritten(ins, 1) ? 2 : 1,
+					IARG_UINT32, INS_MemoryOperandIsRead(ins, 1) ? 1 : 2,
 					IARG_MEMORYOP_EA, 1,
 					IARG_MEMORYREAD_SIZE,
 					IARG_UINT32, INS_MemoryOperandIndexToOperandIndex(ins, 0),
