@@ -5,7 +5,7 @@
 #include <map>
 #include <sstream>
 
-#define VERSION "0.25"
+#define VERSION "0.26"
 #define MAX_TAINT_DATA 0x1000
 
 #if defined(__i386__) || defined(_WIN32)
@@ -56,6 +56,11 @@ list <ADDRINT> tainted_addrs;
 map <ADDRINT, unsigned int> tainted_offsets;
 map <ADDRINT, unsigned int> tainted_operations;
 map < int, list <REG> > tainted_regs;
+enum MemoryOperand {
+	READ = 0b01,
+	WRITE = 0b10,
+	READ_WRITE = 0b11
+};
 map < int, Operands > operands;
 map < int, string > equations;
 map < int, string > symbolic_memory;
@@ -1610,8 +1615,8 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rr
 	if( opcode == XED_ICLASS_XOR && rregs_count > 1 && rregs[0] == rregs[1] )
 		return;
 
-	if(memop0_type == 1) find_tainted_data(memop0);
-	if(memop1_type == 1) find_tainted_data(memop1);
+	if(memop0_type&READ) find_tainted_data(memop0);
+	if(memop1_type&READ) find_tainted_data(memop1);
 
 	for( i = 0; i < rregs_count; i++ ) /* каждый из читаемых регистров */
 	{
@@ -1630,18 +1635,18 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rr
 	}
 
 	/* прямое обращение к памяти на чтение */
-	if( mems_count != 0 && (memop0_type == 1 || memop1_type == 1) && !is_spread ) /* если есть читаемые операнды памяти и не было найдено распространение */
+	if( mems_count != 0 && (memop0_type&READ || memop1_type&READ) && !is_spread ) /* если есть читаемые операнды памяти и не было найдено распространение */
 	{
 		for( addr_it = tainted_addrs.begin(); addr_it != tainted_addrs.end(); addr_it++ )
 		{
-			if( memop0_type == 1 && *addr_it == memop0 )  /* совпадает ли 1 операнд памяти с помеченной памятью */
+			if( memop0_type&READ && *addr_it == memop0 )  /* совпадает ли 1 операнд памяти с помеченной памятью */
 			{
 				taint_memory_read = memop0;
 				is_spread = 1; 	/* обнаружено распространение памяти */
 				offset = tainted_offsets[memop0];
 				break;
 			}
-			if( memop1_type == 1 && *addr_it == memop1 ) 	/* совпадает ли 2 операнд памяти с помеченной памятью */
+			if( memop1_type&READ && *addr_it == memop1 ) 	/* совпадает ли 2 операнд памяти с помеченной памятью */
 			{
 				taint_memory_read = memop1;
 				is_spread = 1; 	/* обнаружено распространение памяти */
@@ -1660,9 +1665,9 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rr
 
 		fprintf(f, "[debug] concolic: %s\n", expression.c_str());
 		/* прямое обращение к памяти на запись */
-		if( mems_count != 0 && (memop0_type == 2 || memop1_type == 2) ) /* если есть записываемый операнд памяти */
+		if( mems_count != 0 && (memop0_type&WRITE || memop1_type&WRITE) ) /* если есть записываемый операнд памяти */
 		{
-			if(memop0_type == 2)
+			if(memop0_type&WRITE)
 			{
 				for(i = 0; i < size; i++)
 				{
@@ -1681,7 +1686,7 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rr
 				}
 				taint_memory_write = memop0;
 			}
-			if(memop1_type == 2)
+			if(memop1_type&WRITE)
 			{
 				for(i = 0; i < size; i++)
 				{
@@ -1723,12 +1728,12 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rr
 			del_symbolic_register( wregs[i], threadid );
 		}
 		
-		if(memop0_type == 2)
+		if(memop0_type&WRITE)
 		{
 			del_mem_taint( memop0 );
 			del_symbolic_memory( memop0 );
 		}
-		if(memop1_type == 2)
+		if(memop1_type&WRITE)
 		{
 			del_mem_taint( memop1 );
 			del_symbolic_memory( memop0 );
@@ -1875,9 +1880,7 @@ void ins_instrument(INS ins, VOID * v)
 					IARG_UINT32, wregs_count,
 					IARG_PTR, wregs,
 					IARG_UINT32, 1,
-					//IARG_UINT32, INS_MemoryOperandIsWritten(ins, 0) ? 2 : 1,
-					IARG_UINT32, INS_MemoryOperandIsRead(ins, 0) ? 1 : 2,
-					/* !операнд может быть и READ и WRITE in same time! */
+					IARG_UINT32, INS_MemoryOperandIsRead(ins, 0) ? ( INS_MemoryOperandIsWritten(ins, 0)? READ_WRITE : READ ) : WRITE,
 					IARG_MEMORYOP_EA, 0,
 					IARG_UINT32, 0,
 					IARG_UINT32, 0,
@@ -1897,11 +1900,9 @@ void ins_instrument(INS ins, VOID * v)
 					IARG_UINT32, wregs_count,
 					IARG_PTR, wregs,
 					IARG_UINT32, 2,
-					//IARG_UINT32, INS_MemoryOperandIsWritten(ins, 0) ? 2 : 1,
-					IARG_UINT32, INS_MemoryOperandIsRead(ins, 0) ? 1 : 2,
+					IARG_UINT32, INS_MemoryOperandIsRead(ins, 0) ? ( INS_MemoryOperandIsWritten(ins, 0)? READ_WRITE : READ ) : WRITE,
 					IARG_MEMORYOP_EA, 0,
-					//IARG_UINT32, INS_MemoryOperandIsWritten(ins, 1) ? 2 : 1,
-					IARG_UINT32, INS_MemoryOperandIsRead(ins, 1) ? 1 : 2,
+					IARG_UINT32, INS_MemoryOperandIsRead(ins, 1) ? ( INS_MemoryOperandIsWritten(ins, 1)? READ_WRITE : READ ) : WRITE,
 					IARG_MEMORYOP_EA, 1,
 					IARG_MEMORYREAD_SIZE,
 					IARG_UINT32, INS_MemoryOperandIndexToOperandIndex(ins, 0),
