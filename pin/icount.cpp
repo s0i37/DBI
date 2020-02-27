@@ -1,33 +1,3 @@
-/*BEGIN_LEGAL 
-Intel Open Source License 
-
-Copyright (c) 2002-2018 Intel Corporation. All rights reserved.
- 
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are
-met:
-
-Redistributions of source code must retain the above copyright notice,
-this list of conditions and the following disclaimer.  Redistributions
-in binary form must reproduce the above copyright notice, this list of
-conditions and the following disclaimer in the documentation and/or
-other materials provided with the distribution.  Neither the name of
-the Intel Corporation nor the names of its contributors may be used to
-endorse or promote products derived from this software without
-specific prior written permission.
- 
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE INTEL OR
-ITS CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-END_LEGAL */
 #include <iostream>
 #include "pin.H"
 #include <stdio.h>
@@ -36,6 +6,8 @@ END_LEGAL */
 long unsigned int icount = 0;
 const char * outfile_name;
 FILE *f;
+
+using namespace std;
 
 KNOB<string> Knob_outfile(KNOB_MODE_WRITEONCE,  "pintool", "outfile", "icount.log", "Output file");
 
@@ -48,7 +20,7 @@ VOID docount(INT32 c)
         fflush(f);
     }
 }
-    
+
 VOID Trace(TRACE trace, VOID *v)
 {
     for (BBL bbl = TRACE_BblHead(trace); BBL_Valid(bbl); bbl = BBL_Next(bbl))
@@ -70,9 +42,56 @@ int main(INT32 argc, CHAR **argv)
 
     TRACE_AddInstrumentFunction(Trace, 0);
     PIN_AddFiniFunction(Fini, 0);
-    
+
     // Never returns
     PIN_StartProgram();
-    
+
     return 0;
 }
+
+/*
+    add r1, [m2]
+        INS_Opcode(ins) = XED_ICLASS_ADD;
+        INS_OperandCount(ins) = 3;
+        INS_MemoryOperandCount(ins) = 1;
+        INS_OperandReg(ins,0) = r1;
+        INS_OperandReg(ins,1) = invalid;
+        IARG_MEMORYOP_EA, 0 = m2;
+        INS_MemoryOperandIsRead(ins,0) = true;
+        INS_MemoryOperandIndexToOperandIndex(ins,0) = 1;
+    add esp, 4
+        INS_OperandCount(ins) = 3;
+        INS_MemoryOperandCount(ins) = 0;;
+    add [esp-10], 1
+        INS_OperandCount(ins) = 3;
+        INS_MemoryOperandCount(ins) = 1;
+    add edi, eax
+        INS_OperandCount(ins) = 3;
+        INS_MemoryOperandCount(ins) = 0;
+        INS_OperandReg(ins,0) = edi;
+        INS_OperandReg(ins,1) = eax;
+    add edx, [esi+24]
+        INS_OperandCount(ins) = 3;
+        INS_MemoryOperandCount(ins) = 1;
+        INS_OperandReg(0) = edx;
+        INS_OperandReg(1) = invalid;
+    add [esi+28], eax
+        INS_OperandCount(ins) = 3;
+        INS_MemoryOperandCount(ins) = 1;
+        INS_OperandReg(ins,0) = invalid;
+        INS_OperandReg(ins,1) = eax;
+    add edx, dword ptr ds:[esi+24]
+        INS_RegR(ins,0) = edx;
+        INS_RegR(ins,1) = esi;
+        INS_RegR(ins,2) = ds;
+        INS_RegR(ins,3) = invalid;
+        INS_RegW(ins,0) = edx;
+        INS_RegW(ins,1) = eflags;
+        INS_RegW(ins,2) = invalid;
+        INS_MaxNumRRegs(ins) = 3;
+        INS_MaxNumWRegs(ins) = 2;
+    cmp eax, 0x2733
+        INS_OperandImmediate(ins,1) = 0x2733;
+        INS_OperandReg(ins,2) = eflags;
+        INS_OperandIsImplicit(ins,2) = true;
+*/
