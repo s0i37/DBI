@@ -42,14 +42,15 @@ Process.setExceptionHandler(onExc)
 
 
 /*
-this = {
-	returnAddress:
-	threadId:
-	depth:
-	context: {
-		eax:,
-		ecx:,
-		...
+В Interceptor.attach() в событии onEnter/onLeave дополнительно доступны:
+	this = {
+		returnAddress:
+		threadId:
+		depth:
+		context: {
+			eax:,
+			ecx:,
+			...
+		}
 	}
-}
 */
