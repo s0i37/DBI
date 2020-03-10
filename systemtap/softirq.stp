@@ -1,0 +1,5 @@
+#!/usr/bin/env stap
+probe softirq.entry
+{
+	printf("%x %i [0x%x]\n",vec,vec_nr,action)
+}

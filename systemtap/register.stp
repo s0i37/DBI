@@ -1,0 +1,7 @@
+#!/usr/bin/env stap
+ probe kernel.function("native_read_cr0").return
+ {
+	printf("ESP: 0x%X ",register("esp"));
+	printf("%s (%d)\n",execname(),pid());
+ }
+

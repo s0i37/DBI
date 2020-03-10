@@ -1,0 +1,11 @@
+#!/usr/bin/env stap
+
+ probe module("kern").function("device_open").return
+ {
+	print_regs();
+	printf("cs: 0x%x\n",register("cs"));
+	print_backtrace();
+	printf("%s (%d) [0x%x]\n",execname(),pid(),uaddr());
+	println("================================================");
+ }
+

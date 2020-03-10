@@ -1,0 +1,6 @@
+#!/usr/bin/env stap
+probe irq_handler.entry
+{
+	printf("irq %d: [0x%X]\n",irq,handler)
+	print_regs()
+}

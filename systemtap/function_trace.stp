@@ -1,0 +1,3 @@
+probe module("ath5k").function("ath5k_hw_channel") {
+  printf("%s [%d]\n",execname(),uid());
+}

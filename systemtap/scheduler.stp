@@ -1,0 +1,5 @@
+#!/usr/bin/env stap
+probe scheduler.wakeup
+{
+	printf("PID: %d TID: %d\n",task_pid,task_tid)
+}

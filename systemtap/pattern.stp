@@ -1,0 +1,7 @@
+#!/usr/bin/env stap
+ probe kernel.function("native_read_cr0")
+ {
+	println(pp());
+ }
+
+

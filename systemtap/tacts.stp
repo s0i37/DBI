@@ -1,0 +1,5 @@
+ probe module("usb_wwan").function("usb_wwan_write").return
+ {
+	println(get_cycles())
+ }
+

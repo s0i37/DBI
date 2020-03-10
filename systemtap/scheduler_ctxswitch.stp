@@ -1,0 +1,5 @@
+#!/usr/bin/env stap
+probe scheduler.ctxswitch
+{
+	println(next_task_name)
+}

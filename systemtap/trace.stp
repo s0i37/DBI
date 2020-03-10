@@ -1,0 +1,5 @@
+probe module("bluetooth").function("hci_dev_open")
+{
+	printf("%s (%d) ",execname(),pid())
+	println(ubacktrace());
+}

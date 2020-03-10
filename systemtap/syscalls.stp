@@ -1,0 +1,11 @@
+ global entry
+ probe kernel.function("sys_poll")
+ {
+	entry++
+ }
+ probe timer.ms(1000) 
+ {
+  printf("\rsyscalls: %d ",entry)
+  entry=0
+}
+

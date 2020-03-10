@@ -1,0 +1,7 @@
+#!/usr/bin/env stap
+ probe process("/usr/bin/eject").function("*")
+ {
+	println(probefunc());
+ }
+
+

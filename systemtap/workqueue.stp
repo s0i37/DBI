@@ -1,0 +1,5 @@
+#!/usr/bin/env stap
+probe workqueue.insert
+{
+	printf("task_struct: 0x%x entry: 0x%x work_struct: 0x%x\n",wq_thread,work_func,work);
+}

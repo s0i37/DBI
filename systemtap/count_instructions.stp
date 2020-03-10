@@ -1,0 +1,3 @@
+global steps;
+probe process(574).insn {steps++}
+probe end {printf("%i\n",steps);}

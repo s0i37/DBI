@@ -1,0 +1,16 @@
+#!/usr/bin/env stap
+global intr,ctx
+probe irq_handler.entry
+{
+	if(irq==0) intr++
+}
+probe timer.ms(1000)
+{
+	printf("irq 0: %d /s\nctx: %d /s\n",intr,ctx)
+	intr=0
+	ctx=0
+}
+probe scheduler.ctxswitch
+{
+	ctx++
+}
