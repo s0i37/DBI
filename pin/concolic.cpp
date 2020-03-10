@@ -5,6 +5,8 @@
 #include <map>
 #include <sstream>
 
+using namespace std;
+
 #define VERSION "0.26"
 #define MAX_TAINT_DATA 0x1000
 

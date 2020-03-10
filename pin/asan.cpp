@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <iostream>
 
+using namespace std;
+
 #define VERSION "0.39"
 
 #define ALLOCATE 1

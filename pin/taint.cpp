@@ -3,6 +3,8 @@
 #include <list>
 #include <map>
 
+using namespace std;
+
 #define VERSION "0.53"
 #define MAX_TAINT_DATA 0x1000
 

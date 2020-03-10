@@ -4,6 +4,7 @@
 #include <iostream>
 #include <list>
 
+using namespace std;
 #define VERSION "0.36"
 
 #if defined(__i386__) || defined(_WIN32)

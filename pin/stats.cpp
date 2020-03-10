@@ -3,6 +3,8 @@
 #include <map>
 #include <list>
 
+using namespace std;
+
 #define VERSION "0.12"
 
 FILE * f;

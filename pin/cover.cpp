@@ -4,6 +4,8 @@
 #include <iostream>
 #include <list>
 
+using namespace std;
+
 #define VERSION "0.40"
 #define COVER_SIZE 0x1000
 
