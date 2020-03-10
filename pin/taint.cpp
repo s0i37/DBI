@@ -5,7 +5,7 @@
 
 using namespace std;
 
-#define VERSION "0.53"
+#define VERSION "0.54"
 #define MAX_TAINT_DATA 0x1000
 
 #if defined(__i386__) || defined(_WIN32)
@@ -655,20 +655,25 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rr
 	{
 		for( addr_it = tainted_addrs.begin(); addr_it != tainted_addrs.end(); addr_it++ )
 		{
-			if( memop0_type&READ && *addr_it == memop0 )  /* совпадает ли 1 операнд памяти с помеченной памятью */
+			for(i = 0; i < size; i++)
 			{
-				taint_memory_read = memop0;
-				is_spread = 1; 	/* обнаружено распространение памяти */
-				offset = tainted_offsets[memop0];
-				break;
+				if( memop0_type&READ && *addr_it == memop0+i )  /* совпадает ли 1 операнд памяти с помеченной памятью */
+				{
+					taint_memory_read = memop0+i;
+					is_spread = 1; 	/* обнаружено распространение памяти */
+					offset = tainted_offsets[memop0+i];
+					break;
+				}
+				if( memop1_type&READ && *addr_it == memop1+i ) 	/* совпадает ли 2 операнд памяти с помеченной памятью */
+				{
+					taint_memory_read = memop1+i;
+					is_spread = 1; 	/* обнаружено распространение памяти */
+					offset = tainted_offsets[memop1+i];
+					break;
+				}
 			}
-			if( memop1_type&READ && *addr_it == memop1 ) 	/* совпадает ли 2 операнд памяти с помеченной памятью */
-			{
-				taint_memory_read = memop1;
-				is_spread = 1; 	/* обнаружено распространение памяти */
-				offset = tainted_offsets[memop1];
+			if(is_spread)
 				break;
-			}
 		}
 	}
 	

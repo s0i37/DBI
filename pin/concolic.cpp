@@ -7,7 +7,7 @@
 
 using namespace std;
 
-#define VERSION "0.26"
+#define VERSION "0.27"
 #define MAX_TAINT_DATA 0x1000
 
 #if defined(__i386__) || defined(_WIN32)
@@ -98,6 +98,50 @@ void add_symbolic_memory(ADDRINT addr, string expression)
 {
 	fprintf(f,"[debug] 0x%lx: %s\n", addr, expression.c_str());
 	symbolic_memory[addr] = expression;
+}
+
+string get_symbolic_expression(ADDRINT mem, UINT32 size)
+{
+	unsigned int i;
+	stringstream expression;
+	for(i = 0; i < size; i++)
+		expression << "(";
+	for(i = 0; i < size; i++)
+	{
+		if( check_mem_taint(mem+i) )
+			expression << symbolic_memory[mem+i];
+		else
+			expression << "0x" << hex << *(UINT8 *)(mem+i);
+		expression << "<<" << i*8 << ")+";
+	}
+	expression << ")";
+	fprintf(f, "[debug] get_symbolic_expression %s\n", expression.str().c_str());
+	return expression.str();
+}
+
+void add_symbolic_register_from_memory(REG reg, UINT32 threadid, ADDRINT mem, UINT32 size)
+{
+	switch(reg)
+	{
+		case REG_GAX:
+			if(size == sizeof(int))
+				symbolic_registers[threadid][REG_GAX] = get_symbolic_expression(mem,size);
+	#if defined(X64)
+		case REG_EAX:
+			if(size == sizeof(int)/2)
+				symbolic_registers[threadid][REG_EAX] = get_symbolic_expression(mem,size);
+	#endif
+		case REG_AX:
+			if(size == 2)
+				symbolic_registers[threadid][REG_AX] = get_symbolic_expression(mem,size);
+		case REG_AH:
+			if(size == 1)
+				symbolic_registers[threadid][REG_AH] = get_symbolic_expression(mem,size);
+		case REG_AL:
+			if(size == 1)
+				symbolic_registers[threadid][REG_AL] = get_symbolic_expression(mem,size);
+						break;
+	}
 }
 void add_symbolic_register(REG reg, UINT32 threadid, string expression)
 {
@@ -1090,6 +1134,7 @@ string concolic(REG reg, ADDRINT mem, UINT32 threadid, ADDRINT eip, CONTEXT * ct
 
 	if( ( opcode == XED_ICLASS_CMP) )
 	{
+		/* !нужно запомнить операнды тут, т.к. между cmp и jz могут быть инструкции */
 		if( operands[threadid].operand1.is_tainted )
 		{
 			//fprintf(f, "x=SYM, ");
@@ -1641,20 +1686,25 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rr
 	{
 		for( addr_it = tainted_addrs.begin(); addr_it != tainted_addrs.end(); addr_it++ )
 		{
-			if( memop0_type&READ && *addr_it == memop0 )  /* совпадает ли 1 операнд памяти с помеченной памятью */
+			for(i = 0; i < size; i++)
 			{
-				taint_memory_read = memop0;
-				is_spread = 1; 	/* обнаружено распространение памяти */
-				offset = tainted_offsets[memop0];
-				break;
+				if( memop0_type&READ && *addr_it == memop0+i )  /* совпадает ли 1 операнд памяти с помеченной памятью */
+				{
+					taint_memory_read = memop0+i;
+					is_spread = 1; 	/* обнаружено распространение памяти */
+					offset = tainted_offsets[memop0+i];
+					break;
+				}
+				if( memop1_type&READ && *addr_it == memop1+i ) 	/* совпадает ли 2 операнд памяти с помеченной памятью */
+				{
+					taint_memory_read = memop1+i;
+					is_spread = 1; 	/* обнаружено распространение памяти */
+					offset = tainted_offsets[memop1+i];
+					break;
+				}
 			}
-			if( memop1_type&READ && *addr_it == memop1 ) 	/* совпадает ли 2 операнд памяти с помеченной памятью */
-			{
-				taint_memory_read = memop1;
-				is_spread = 1; 	/* обнаружено распространение памяти */
-				offset = tainted_offsets[memop1];
+			if(is_spread)
 				break;
-			}
 		}
 	}
 
@@ -1682,7 +1732,7 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rr
 						if(reg)
 							add_symbolic_memory( memop0+i, symbolic_registers[threadid][reg] );
 						else if(taint_memory_read)
-							add_symbolic_memory( memop0+i, symbolic_memory[taint_memory_read] );
+							add_symbolic_memory( memop0+i, symbolic_memory[taint_memory_read+i] );
 					}
 
 				}
@@ -1701,7 +1751,7 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rr
 						if(reg)
 							add_symbolic_memory( memop0+i, symbolic_registers[threadid][reg] );
 						else if(taint_memory_read)
-							add_symbolic_memory( memop0+i, symbolic_memory[taint_memory_read] );
+							add_symbolic_memory( memop0+i, symbolic_memory[taint_memory_read+i] );
 					}
 				}
 				taint_memory_write = memop1;
@@ -1718,7 +1768,7 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rr
 				if(reg)
 					add_symbolic_register( wregs[j], threadid, symbolic_registers[threadid][reg] );
 				else if(taint_memory_read)
-					add_symbolic_register( wregs[j], threadid, symbolic_memory[taint_memory_read] );
+					add_symbolic_register_from_memory( wregs[j], threadid, taint_memory_read, size );
 			}
 		}
 	}
