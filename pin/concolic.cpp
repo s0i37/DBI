@@ -94,6 +94,13 @@ KNOB<string> Knob_taint(KNOB_MODE_WRITEONCE,  "pintool", "taint", "", "taint thi
 KNOB<UINT32> Knob_offset(KNOB_MODE_WRITEONCE,  "pintool", "offset", "0", "from offset (subdata)");
 KNOB<UINT32> Knob_size(KNOB_MODE_WRITEONCE,  "pintool", "size", "0", "size bytes (subdata)");
 
+BOOL check_mem_taint(ADDRINT addr)
+{
+	if(symbolic_memory.find(addr) != symbolic_memory.end())
+		return TRUE;
+	else
+		return FALSE;
+}
 void add_symbolic_memory(ADDRINT addr, string expression)
 {
 	fprintf(f,"[debug] 0x%lx: %s\n", addr, expression.c_str());
@@ -115,7 +122,7 @@ string get_symbolic_expression(ADDRINT mem, UINT32 size)
 		expression << "<<" << i*8 << ")+";
 	}
 	expression << ")";
-	fprintf(f, "[debug] get_symbolic_expression %s\n", expression.str().c_str());
+//	fprintf(f, "[debug] get_symbolic_expression %s\n", expression.str().c_str());
 	return expression.str();
 }
 
@@ -140,12 +147,13 @@ void add_symbolic_register_from_memory(REG reg, UINT32 threadid, ADDRINT mem, UI
 		case REG_AL:
 			if(size == 1)
 				symbolic_registers[threadid][REG_AL] = get_symbolic_expression(mem,size);
-						break;
+			break;
+		default: break;
 	}
 }
 void add_symbolic_register(REG reg, UINT32 threadid, string expression)
 {
-	fprintf(f,"[debug] %s= %s\n", REG_StringShort(reg).c_str(), expression.c_str());
+//	fprintf(f,"[debug] %s= %s\n", REG_StringShort(reg).c_str(), expression.c_str());
 	switch(reg)
 	{
 		case REG_AH:	symbolic_registers[threadid][REG_AH] = expression;
@@ -1715,7 +1723,7 @@ void taint(UINT32 threadid, ADDRINT eip, CONTEXT * ctx, OPCODE opcode, UINT32 rr
 		if( (eip >= low_boundary && eip < high_boundary) || (low_boundary == 0 && high_boundary == 0) )
 			expression = concolic(reg, taint_memory_read, threadid, eip, ctx, opcode, rregs_count, rregs, wregs_count, wregs, mems_count, memop0_type, memop0, memop1_type, memop1, size, memop_index, immediate, immediate_size);
 
-		fprintf(f, "[debug] concolic: %s\n", expression.c_str());
+//		fprintf(f, "[debug] concolic: %s\n", expression.c_str());
 		/* прямое обращение к памяти на запись */
 		if( mems_count != 0 && (memop0_type&WRITE || memop1_type&WRITE) ) /* если есть записываемый операнд памяти */
 		{
