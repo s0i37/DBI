@@ -5,7 +5,7 @@
 #include <list>
 
 using namespace std;
-#define VERSION "0.36"
+#define VERSION "0.37"
 
 #if defined(__i386__) || defined(_WIN32)
 	#define HEX_FMT "0x%08x"
@@ -23,12 +23,15 @@ long long int takt = 0;
 list <string> functions;
 unsigned int instructions = 0;
 unsigned int max_instructions = 0;
+int near_bytes = 0;
+long long int lines = 0;
 
 KNOB<BOOL> Knob_debug(KNOB_MODE_WRITEONCE,  "pintool", "debug", "0", "Enable debug mode");
-KNOB<string> Knob_outfile(KNOB_MODE_WRITEONCE,  "pintool", "outfile", "trace.txt", "Output file");
+KNOB<string> Knob_outfile(KNOB_MODE_WRITEONCE,  "pintool", "outfile", "trace.log", "Output file");
 KNOB<ADDRINT> Knob_from(KNOB_MODE_WRITEONCE, "pintool", "from", "0", "start address (absolute) for tracing");
 KNOB<ADDRINT> Knob_to(KNOB_MODE_WRITEONCE, "pintool", "to", "0", "stop address (absolute) for tracing");
 KNOB<ADDRINT> Knob_max_inst(KNOB_MODE_WRITEONCE, "pintool", "max_inst", "0", "maximum count of instructions for tracing");
+KNOB<INT32> Knob_near_bytes(KNOB_MODE_WRITEONCE, "pintool", "near_bytes", "0", "show bytes near from memory access");
 KNOB<string> Knob_module(KNOB_MODE_WRITEONCE,  "pintool", "module", "", "tracing just this module");
 
 VOID dotrace_exec(CONTEXT *ctx, UINT32 threadid, ADDRINT eip, USIZE opcode_size)
@@ -51,7 +54,10 @@ VOID dotrace_exec(CONTEXT *ctx, UINT32 threadid, ADDRINT eip, USIZE opcode_size)
 	for(i = 0; i < opcode_size; i++)
 		fprintf( f, "%02X", ( (unsigned char *) eip )[i] );
 	fprintf(f, "} " HEX_FMT "," HEX_FMT "," HEX_FMT "," HEX_FMT "," HEX_FMT "," HEX_FMT "," HEX_FMT "," HEX_FMT "\n", eax,ecx,edx,ebx,esp,ebp,esi,edi);
-	fflush(f);
+	lines++;
+
+	if(lines % 100000 == 0)
+		fflush(f);
 }
 
 VOID dotrace_mem_read(UINT32 threadid, ADDRINT eip, ADDRINT memop, UINT32 size)
@@ -60,21 +66,54 @@ VOID dotrace_mem_read(UINT32 threadid, ADDRINT eip, ADDRINT memop, UINT32 size)
 	switch(size)
 	{
 		case 1:
-			fprintf( f, "0x%02x\n", *(unsigned char *)memop );
+			fprintf( f, "0x%02x", *(unsigned char *)memop );
 			break;
 		case 2:
-			fprintf( f, "0x%04x\n", *(unsigned short *)memop );
+			fprintf( f, "0x%04x", *(unsigned short *)memop );
 			break;
 		case 4:
-			fprintf( f, "0x%08x\n", *(unsigned int *)memop );
+			fprintf( f, "0x%08x", *(unsigned int *)memop );
 			break;
 		case 8:
 			fprintf( f, "0x%08x", *(unsigned int *)memop );
-			fprintf( f, "%08x\n", *( ((unsigned int *)memop) + 1 ) );
+			fprintf( f, "%08x", *( ((unsigned int *)memop) + 1 ) );
 			break;
-
+		case 16:
+			fprintf( f, "0x%08x", *(unsigned int *)memop );
+			fprintf( f, "%08x", *( ((unsigned int *)memop) + 1 ) );
+			fprintf( f, "%08x", *( ((unsigned int *)memop) + 2 ) );
+			fprintf( f, "%08x", *( ((unsigned int *)memop) + 3 ) );
+			break;
 	}
-	fflush(f);
+	fprintf(f, "\n");
+	lines++;
+
+	if(near_bytes)
+	{
+		BOOL has_started = false;
+		for(INT32 i = 0; i < near_bytes; i++)
+		{
+			if(! PIN_CheckReadAccess((VOID*)(memop-near_bytes+i)))
+				continue;
+			if(!has_started)
+			{
+				fprintf(f, "%lli:" HEX_FMT ":0x%x [" HEX_FMT "]: ", takt, eip, threadid, memop-near_bytes);
+				has_started = true;
+			}
+			fprintf( f, "%02X", *(unsigned char *)(memop-near_bytes+i) );
+		}
+		for(INT32 i = 0; i < near_bytes; i++)
+		{
+			if(! PIN_CheckReadAccess((VOID*)(memop+i)))
+				break;
+			fprintf( f, "%02X", *(unsigned char *)(memop+i) );
+		}
+		fprintf(f, "\n");
+		lines++;
+	}
+
+	if(lines % 100000 == 0)
+		fflush(f);
 }
 
 VOID dotrace_mem_write(UINT32 threadid, ADDRINT eip, ADDRINT memop, UINT32 size)
@@ -83,21 +122,54 @@ VOID dotrace_mem_write(UINT32 threadid, ADDRINT eip, ADDRINT memop, UINT32 size)
 	switch(size)
 	{
 		case 1:
-			fprintf( f, "0x%02x\n", *(unsigned char *)memop );
+			fprintf( f, "0x%02x", *(unsigned char *)memop );
 			break;
 		case 2:
-			fprintf( f, "0x%04x\n", *(unsigned short *)memop );
+			fprintf( f, "0x%04x", *(unsigned short *)memop );
 			break;
 		case 4:
-			fprintf( f, "0x%08x\n", *(unsigned int *)memop );
+			fprintf( f, "0x%08x", *(unsigned int *)memop );
 			break;
 		case 8:
 			fprintf( f, "0x%08x", *(unsigned int *)memop );
-			fprintf( f, "%08x\n", *( ((unsigned int *)memop) + 1 ) );
+			fprintf( f, "%08x", *( ((unsigned int *)memop) + 1 ) );
 			break;
-
+		case 16:
+			fprintf( f, "0x%08x", *(unsigned int *)memop );
+			fprintf( f, "%08x", *( ((unsigned int *)memop) + 1 ) );
+			fprintf( f, "%08x", *( ((unsigned int *)memop) + 2 ) );
+			fprintf( f, "%08x", *( ((unsigned int *)memop) + 3 ) );
+			break;
 	}
-	fflush(f);
+	fprintf(f, "\n");
+	lines++;
+
+	if(near_bytes)
+	{
+		BOOL has_started = false;
+		for(INT32 i = 0; i < near_bytes; i++)
+		{
+			if(! PIN_CheckReadAccess((VOID*)(memop-near_bytes+i)))
+				continue;
+			if(!has_started)
+			{
+				fprintf(f, "%lli:" HEX_FMT ":0x%x [" HEX_FMT "]: ", takt, eip, threadid, memop-near_bytes);
+				has_started = true;
+			}
+			fprintf( f, "%02X", *(unsigned char *)(memop-near_bytes+i) );
+		}
+		for(INT32 i = 0; i < near_bytes; i++)
+		{
+			if(! PIN_CheckReadAccess((VOID*)(memop+i)))
+				break;
+			fprintf( f, "%02X", *(unsigned char *)(memop+i) );
+		}
+		fprintf(f, "\n");
+		lines++;
+	}
+
+	if(lines % 100000 == 0)
+		fflush(f);
 }
 
 
@@ -200,6 +272,7 @@ int main(int argc, char ** argv)
     high_boundary = Knob_to.Value();
     need_module = Knob_module.Value();
     max_instructions = Knob_max_inst.Value();
+    near_bytes = Knob_near_bytes.Value();
 	outfile_name = Knob_outfile.Value().c_str();
 	f = fopen(outfile_name, "w");
 	fprintf(f, "[#] TAKT:EIP:THREAD_ID {OPCODE} EAX,ECX,EDX,EBX,ESP,EBP,ESI,EDI\n");
