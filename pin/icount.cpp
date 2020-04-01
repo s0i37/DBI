@@ -3,22 +3,31 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#define VERSION "0.10"
+#define STEP 1 * 1000 * 1000;
+
 long unsigned int icount = 0;
+unsigned int max_instructions = 0;
+unsigned int edge = STEP;
 const char * outfile_name;
 FILE *f;
 
 using namespace std;
 
 KNOB<string> Knob_outfile(KNOB_MODE_WRITEONCE,  "pintool", "outfile", "icount.log", "Output file");
+KNOB<ADDRINT> Knob_max_inst(KNOB_MODE_WRITEONCE, "pintool", "max_inst", "0", "maximum count of instructions for tracing");
 
 VOID docount(INT32 c)
 {
     icount += c;
-    if(icount%1000==0)
+    if(icount >= edge)
     {
         fprintf(f,"%lu\n",icount);
         fflush(f);
+        edge += STEP;
     }
+    if(icount >= max_instructions)
+        PIN_Detach();
 }
 
 VOID Trace(TRACE trace, VOID *v)
@@ -38,6 +47,7 @@ int main(INT32 argc, CHAR **argv)
 {
     PIN_Init(argc, argv);
     outfile_name = Knob_outfile.Value().c_str();
+    max_instructions = Knob_max_inst.Value();
     f = fopen(outfile_name, "w");
 
     TRACE_AddInstrumentFunction(Trace, 0);
