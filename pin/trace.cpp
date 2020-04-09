@@ -5,7 +5,7 @@
 #include <list>
 
 using namespace std;
-#define VERSION "0.37"
+#define VERSION "0.39"
 
 #if defined(__i386__) || defined(_WIN32)
 	#define HEX_FMT "0x%08x"
@@ -34,12 +34,19 @@ KNOB<ADDRINT> Knob_max_inst(KNOB_MODE_WRITEONCE, "pintool", "max_inst", "0", "ma
 KNOB<INT32> Knob_near_bytes(KNOB_MODE_WRITEONCE, "pintool", "near_bytes", "0", "show bytes near from memory access");
 KNOB<string> Knob_module(KNOB_MODE_WRITEONCE,  "pintool", "module", "", "tracing just this module");
 
+VOID detach(VOID)
+{
+	fflush(f);
+	fclose(f);
+	PIN_Detach();
+}
+
 VOID dotrace_exec(CONTEXT *ctx, UINT32 threadid, ADDRINT eip, USIZE opcode_size)
 {
 	unsigned int i;
 	instructions += 1;
 	if(instructions == max_instructions)
-		PIN_Detach();
+		detach();
 	ADDRINT eax = PIN_GetContextReg(ctx, REG_GAX);
 	ADDRINT ecx = PIN_GetContextReg(ctx, REG_GCX);
 	ADDRINT edx = PIN_GetContextReg(ctx, REG_GDX);
@@ -75,14 +82,14 @@ VOID dotrace_mem_read(UINT32 threadid, ADDRINT eip, ADDRINT memop, UINT32 size)
 			fprintf( f, "0x%08x", *(unsigned int *)memop );
 			break;
 		case 8:
-			fprintf( f, "0x%08x", *(unsigned int *)memop );
-			fprintf( f, "%08x", *( ((unsigned int *)memop) + 1 ) );
+			fprintf( f, "0x%08x", *( ((unsigned int *)memop) + 1 ) );
+			fprintf( f, "%08x", *(unsigned int *)memop );
 			break;
 		case 16:
-			fprintf( f, "0x%08x", *(unsigned int *)memop );
-			fprintf( f, "%08x", *( ((unsigned int *)memop) + 1 ) );
+			fprintf( f, "0x%08x", *( ((unsigned int *)memop) + 3 ) );
 			fprintf( f, "%08x", *( ((unsigned int *)memop) + 2 ) );
-			fprintf( f, "%08x", *( ((unsigned int *)memop) + 3 ) );
+			fprintf( f, "%08x", *( ((unsigned int *)memop) + 1 ) );
+			fprintf( f, "%08x", *(unsigned int *)memop );
 			break;
 	}
 	fprintf(f, "\n");
@@ -131,14 +138,14 @@ VOID dotrace_mem_write(UINT32 threadid, ADDRINT eip, ADDRINT memop, UINT32 size)
 			fprintf( f, "0x%08x", *(unsigned int *)memop );
 			break;
 		case 8:
-			fprintf( f, "0x%08x", *(unsigned int *)memop );
-			fprintf( f, "%08x", *( ((unsigned int *)memop) + 1 ) );
+			fprintf( f, "0x%08x", *( ((unsigned int *)memop) + 1 ) );
+			fprintf( f, "%08x", *(unsigned int *)memop );
 			break;
 		case 16:
-			fprintf( f, "0x%08x", *(unsigned int *)memop );
-			fprintf( f, "%08x", *( ((unsigned int *)memop) + 1 ) );
+			fprintf( f, "0x%08x", *( ((unsigned int *)memop) + 3 ) );
 			fprintf( f, "%08x", *( ((unsigned int *)memop) + 2 ) );
-			fprintf( f, "%08x", *( ((unsigned int *)memop) + 3 ) );
+			fprintf( f, "%08x", *( ((unsigned int *)memop) + 1 ) );
+			fprintf( f, "%08x",  *(unsigned int *)memop );
 			break;
 	}
 	fprintf(f, "\n");
