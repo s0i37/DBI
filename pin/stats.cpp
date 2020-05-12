@@ -5,7 +5,8 @@
 
 using namespace std;
 
-#define VERSION "0.13"
+#define VERSION "0.15"
+#define BUF_SIZE 0x1000
 
 FILE * f;
 const char * outfile_name;
@@ -30,10 +31,20 @@ list <struct Module> modules;
 list <struct Symbol> symbols;
 map <unsigned int, unsigned int> modules_call;
 map <unsigned int, unsigned int> modules_exec;
+map <unsigned int, unsigned int> modules_exec_total;
 map <unsigned int, unsigned int> symbols_call;
 map <unsigned int, unsigned int> symbols_exec;
 unsigned int instructions = 0;
 unsigned int max_instructions = 0;
+char *buf;
+
+namespace windows {
+    #include <Windows.h>
+    HANDLE stat_pipe;
+    BOOL has_stat_pipe_connected = FALSE;
+    char read_from_pipe();
+    void write_to_pipe(char *);
+}
 
 KNOB<string> Knob_outfile(KNOB_MODE_WRITEONCE,  "pintool", "outfile", "stats.log", "Output file");
 KNOB<ADDRINT> Knob_max_inst(KNOB_MODE_WRITEONCE, "pintool", "max_inst", "0", "maximum count of instructions");
@@ -56,36 +67,62 @@ unsigned int get_symbol_id(ADDRINT addr)
 	return 0;
 }
 
+namespace windows {
+    void write_to_pipe(char *string)
+    {
+        DWORD num_written;
+        //Sleep(1000);
+        unsigned int size;
+        size = strlen(string);
+        if(!has_stat_pipe_connected)
+        {
+            ConnectNamedPipe(stat_pipe, NULL); /* WAIT */
+            has_stat_pipe_connected = TRUE;
+        }
+        WriteFile(stat_pipe, string, size, &num_written, NULL);
+    }
+    char read_from_pipe()
+    {
+        DWORD num_read;
+        char result;
+
+        ReadFile(stat_pipe, &result, 1, &num_read, NULL);
+        return result;
+    }
+
+    void setup_pipe()
+    {
+        /* create new pipe */
+        stat_pipe = CreateNamedPipe(
+            "\\\\.\\pipe\\pin_stat",   // pipe name
+            PIPE_ACCESS_DUPLEX ,              // read/write access
+  //          FILE_FLAG_OVERLAPPED,             // overlapped mode
+            0,
+            1,                        // max. instances
+            512,                      // output buffer size
+            512,                      // input buffer size
+            20000,                    // client time-out
+            NULL);                    // default security attribute
+    }
+}
+
 void modules_stats()
 {
 	list <struct Module>::iterator module;
-	list <unsigned int> calls;
-
-	for(module = modules.begin(); module != modules.end(); module++)
-		calls.push_back(modules_call[module->id]);
-	calls.sort();
-
-	printf("module\tcalls\texec\n");
-	do
+	windows::write_to_pipe("module\tcalls\texec\ttotal\n");
+	for( module = modules.begin(); module != modules.end(); module++ )
 	{
-		for( module = modules.begin(); module != modules.end(); module++ )
-		{
-			if(modules_call[module->id] == calls.back())
-			{
-				printf("0x%08lx \t (%u) %s \t %u \t %u\n",
-					module->low_addr, module->id, module->name.c_str(), modules_call[module->id], modules_exec[module->id]);
-				break;
-			}
-		}
-		calls.pop_back();
-	}
-	while(calls.size() != 0);
-
-	for(module = modules.begin(); module != modules.end(); module++)
-	{
+		memset(buf, '\x00', BUF_SIZE);
+		if(modules_exec[module->id])
+			snprintf(buf, BUF_SIZE, "0x%08llx \t (%u) %s \t +%u \t +%u \t %u\n", 
+				module->low_addr, module->id, module->name.c_str(), modules_call[module->id], modules_exec[module->id], modules_exec_total[module->id]);
+		else
+			snprintf(buf, BUF_SIZE, "0x%08llx \t (%u) %s \t %u \t %u \t %u\n", 
+				module->low_addr, module->id, module->name.c_str(), modules_call[module->id], modules_exec[module->id], modules_exec_total[module->id]);
+		windows::write_to_pipe(buf);
 		modules_call[module->id] = 0;
 		modules_exec[module->id] = 0;
-	}	
+	}
 }
 
 void symbols_stats(unsigned int module_id)
@@ -100,7 +137,7 @@ void symbols_stats(unsigned int module_id)
 			calls.push_back(symbols_call[symbol->id]);
 	calls.sort();
 
-	printf("symbol\tcalls\texec\n");
+	windows::write_to_pipe("symbol\tcalls\texec\n");
 	do
 	{
 		for(symbol = symbols.begin(); symbol != symbols.end(); symbol++)
@@ -109,8 +146,10 @@ void symbols_stats(unsigned int module_id)
 			{
 				if(symbols_call[symbol->id] == calls.back())
 				{
-					printf("%s \t %u \t %u\n",
+					memset(buf, '\x00', BUF_SIZE);
+					snprintf(buf, BUF_SIZE, "%s \t %u \t %u\n",
 						symbol->name.c_str(), symbols_call[symbol->id], symbols_exec[symbol->id]);
+					windows::write_to_pipe(buf);
 					break;
 				}
 			}
@@ -131,9 +170,12 @@ void symbols_stats(unsigned int module_id)
 VOID do_exec(ADDRINT addr)
 {
 	unsigned int module_id;
-	//unsigned int symbol_id;
+	unsigned int symbol_id;
 	if( (module_id = get_module_id(addr)) != 0 )
+	{
 		modules_exec[module_id]++;
+		modules_exec_total[module_id]++;
+	}
 	//if( (symbol_id = get_symbol_id(addr)) != 0 )
 	//	symbols_exec[symbol_id]++;
 
@@ -143,10 +185,10 @@ VOID do_exec(ADDRINT addr)
 		modules_stats();
 		PIN_Detach();
 	}
-	if(instructions % 100000 == 0)
+	if(instructions % 1000000 == 0)
 	{	
 		modules_stats();
-		//symbols_stats(8);
+		//symbols_stats(3);
 	}
 }
 
@@ -169,6 +211,7 @@ VOID img_instrument(IMG img, VOID * v)
 	modules.push_front( module );
 	modules_call[modules_loaded] = 0;
 	modules_exec[modules_loaded] = 0;
+	modules_exec_total[modules_loaded] = 0;
 
 	for( sec = IMG_SecHead(img); SEC_Valid(sec); sec = SEC_Next(sec) )
 		for( rtn = SEC_RtnHead(sec); RTN_Valid(rtn); rtn = RTN_Next(rtn) )
@@ -196,6 +239,8 @@ VOID ins_instrument(INS ins, VOID *v)
 VOID fini(INT32 code, VOID *v)
 {
 	modules_stats();
+	windows::DisconnectNamedPipe(windows::stat_pipe);
+    windows::CloseHandle(windows::stat_pipe);
 }
 
 int main(int argc, char ** argv)
@@ -203,6 +248,9 @@ int main(int argc, char ** argv)
 	PIN_InitSymbols();
 	if( PIN_Init(argc, argv) )
 		return -1;
+
+	windows::setup_pipe();
+	buf = (char *)malloc(BUF_SIZE);
 
 	outfile_name = Knob_outfile.Value().c_str();
 	max_instructions = Knob_max_inst.Value();
