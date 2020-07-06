@@ -46,6 +46,10 @@ function memdump(that)
 	out = new File('thread_current.txt', 'w')
 	for(var reg in that['context'])
 		out.write("ar " + reg + "=" + that['context'][reg] + "\n")
+	out.write("wx ")
+	for(var i = 0; i < bytes.length; i++)
+		out.write((bytes[i]>16) ? bytes[i].toString(16) : "0" + bytes[i].toString(16))
+	out.write("@0x" + BPX.toString(16) + "\n")
 	out.close()
 	Process.enumerateThreadsSync().forEach(
 		function(thread)
@@ -58,9 +62,11 @@ function memdump(that)
 	)
 }
 
-//var addr = ptr(0x01487fab)
-var addr = Module.getExportByName("libc.so.6","read")
+var BPX = 0x01487fab
+var addr = ptr(BPX)
+//var addr = Module.getExportByName("libc.so.6","read")
 var mem_changed = Memory.readByteArray(addr, 10)
+var bytes = new Uint8Array(mem_changed)
 Interceptor.attach( new NativeFunction( addr, 'int', [] ),
 	{
 		onEnter: function(args) {memdump(this)},
